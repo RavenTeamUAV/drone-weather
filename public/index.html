@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drone Weather</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-velocity@2.1.2/dist/leaflet-velocity.min.css"/>
+  <link rel="stylesheet" href="/css/app.css"/>
+</head>
+<body>
+
+<!-- Панель управління -->
+<div id="panel">
+  <div id="panel-header">
+    <div class="logo">✈ Drone Weather</div>
+    <div id="live-clock"></div>
+  </div>
+
+  <!-- Прихована форма завантаження місії (для mp-upload-input у редакторі) -->
+  <input type="file" id="mission-file" accept=".waypoints,.txt" style="display:none">
+
+  <!-- Панель ручного створення (прихована, показується під час режиму малювання) -->
+  <div id="mission-creator" class="mission-creator hidden">
+    <div class="creator-alt-row">
+      <span class="creator-label">Висота (м):</span>
+      <input id="default-alt" type="number" value="100" min="0" max="5000">
+      <span class="creator-hint">для нових точок</span>
+    </div>
+    <div id="creator-status" class="creator-status">Клікайте на карту щоб додати точки</div>
+    <div class="creator-actions">
+      <button class="btn btn-primary creator-done" onclick="finishMissionCreation()">✓ Готово</button>
+      <button class="btn-small creator-undo" onclick="undoLastWaypoint()" title="Скасувати останню точку">↩ Остання</button>
+      <button class="btn-small creator-cancel" onclick="cancelMissionCreation()">✕</button>
+    </div>
+  </div>
+  <div id="mission-status" class="status-text"></div>
+
+  <!-- Крок 1 (тепер): Вибір борту -->
+  <div class="section">
+    <div class="section-title">1. Борт</div>
+    <div class="drone-select-row">
+      <select id="drone-select">
+        <option value="">— оберіть борт —</option>
+      </select>
+      <button class="btn-icon" onclick="openAddDroneModal()" title="Додати борт">＋</button>
+    </div>
+    <div id="drone-info" class="drone-info"></div>
+  </div>
+
+  <!-- Крок 3: Дата і час -->
+  <div class="section">
+    <div class="section-title">2. Час вильоту</div>
+    <input type="datetime-local" id="datetime-input">
+    <div class="quick-times">
+      <button class="btn-small" onclick="setQuickTime(0)">Зараз</button>
+      <button class="btn-small" onclick="setQuickTime(2)">+2г</button>
+      <button class="btn-small" onclick="setQuickTime(24)">Завтра</button>
+    </div>
+  </div>
+
+  <!-- Приховані елементи точки зльоту (потрібні JS) -->
+  <div id="takeoff-info" style="display:none"></div>
+  <button id="set-takeoff-btn" style="display:none"></button>
+
+  <!-- Кнопка перевірки -->
+  <button id="check-btn" class="btn btn-primary" onclick="checkWeather()">
+    Перевірити погоду
+  </button>
+
+  <!-- Повзунок висоти -->
+  <div id="alt-section" class="section">
+    <div class="section-title">Висота аналізу</div>
+    <div class="alt-slider-row">
+      <span class="alt-min">0</span>
+      <input type="range" id="alt-slider" min="10" max="1500" step="10" value="100">
+      <span class="alt-max">1500м</span>
+    </div>
+    <div class="alt-label-row">
+      <span id="alt-label">100 м</span>
+      <span class="alt-hint">↕ вітер + хмари на карті</span>
+    </div>
+  </div>
+
+  <!-- Результат -->
+  <div id="result-card" class="result-card hidden"></div>
+
+  <!-- Модель погоди -->
+  <div class="section">
+    <div class="section-title">Модель погоди</div>
+    <div class="model-btns">
+      <button class="btn-small model-btn active" data-model="ecmwf" onclick="setWindModel('ecmwf')">ECMWF</button>
+      <button class="btn-small model-btn" data-model="gfs" onclick="setWindModel('gfs')">GFS</button>
+      <button class="btn-small model-btn" data-model="icon" onclick="setWindModel('icon')">ICON</button>
+      <button class="btn-small model-btn" data-model="meteofrance" onclick="setWindModel('meteofrance')">MF</button>
+    </div>
+    <div id="model-label" class="model-label">ECMWF IFS — European Centre</div>
+  </div>
+
+  <!-- Шари карти -->
+  <div class="section">
+    <div class="section-title">Шар карти</div>
+    <div class="layer-btns">
+      <button class="btn-small layer-btn active" data-layer="osm" onclick="switchLayer('osm')">Карта</button>
+      <button class="btn-small layer-btn" data-layer="windy" onclick="switchLayer('windy')">Windy</button>
+    </div>
+  </div>
+
+  <!-- Легенда -->
+  <div class="legend">
+    <div class="legend-item"><span class="dot green"></span> Можна летіти</div>
+    <div class="legend-item"><span class="dot yellow"></span> Обережно</div>
+    <div class="legend-item"><span class="dot red"></span> Не можна летіти</div>
+  </div>
+</div>
+
+<!-- Карта -->
+<div id="map"></div>
+
+<!-- Windy iframe (прихований за замовчуванням) -->
+<div id="windy-container" class="hidden">
+  <iframe id="windy-frame" src="" frameborder="0"></iframe>
+</div>
+
+<!-- Попап погоди по точці -->
+<div id="weather-modal" class="modal hidden">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Модалка додавання борту -->
+<div id="add-drone-modal" class="modal hidden">
+  <div class="modal-content modal-drone">
+    <button class="modal-close" onclick="closeAddDroneModal()">✕</button>
+    <div class="modal-title">✚ Додати борт</div>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Назва борту *</label>
+        <input type="text" id="dn-name" placeholder="Напр. Leleka-100">
+      </div>
+      <div class="form-group">
+        <label>Виробник *</label>
+        <input type="text" id="dn-manufacturer" placeholder="Напр. DeViRo">
+      </div>
+      <div class="form-group">
+        <label>Тип</label>
+        <select id="dn-type">
+          <option value="fixed-wing-vtol">Літак VTOL</option>
+          <option value="fixed-wing">Літак</option>
+          <option value="multirotor">Мультиротор</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Час польоту (хв) *</label>
+        <input type="number" id="dn-flightTime" placeholder="60" min="1" max="600">
+      </div>
+      <div class="form-group">
+        <label>Макс. швидкість (м/с)</label>
+        <input type="number" id="dn-speedMax" placeholder="25" min="0">
+      </div>
+      <div class="form-group">
+        <label>Мін. швидкість (м/с)</label>
+        <input type="number" id="dn-speedMin" placeholder="18" min="0">
+      </div>
+      <div class="form-group">
+        <label>Вітер на зльоті/посадці (м/с) *</label>
+        <input type="number" id="dn-windGround" placeholder="10" min="0" step="0.1">
+      </div>
+      <div class="form-group">
+        <label>Вітер в польоті (м/с) *</label>
+        <input type="number" id="dn-windAir" placeholder="15" min="0" step="0.1">
+      </div>
+      <div class="form-group">
+        <label>Макс. пориви (м/с)</label>
+        <input type="number" id="dn-windGust" placeholder="12" min="0" step="0.1">
+      </div>
+      <div class="form-group">
+        <label>Макс. висота MSL (м)</label>
+        <input type="number" id="dn-maxAlt" placeholder="4000" min="0">
+      </div>
+      <div class="form-group">
+        <label>Мін. темп (°C)</label>
+        <input type="number" id="dn-tempMin" placeholder="-20" min="-60" max="0">
+      </div>
+      <div class="form-group">
+        <label>Макс. темп (°C)</label>
+        <input type="number" id="dn-tempMax" placeholder="40" min="0" max="70">
+      </div>
+      <div class="form-group">
+        <label>Злітна вага (кг)</label>
+        <input type="number" id="dn-weight" placeholder="5.5" min="0" step="0.1">
+      </div>
+      <div class="form-group">
+        <label>IP захист</label>
+        <input type="text" id="dn-ip" placeholder="IP54">
+      </div>
+    </div>
+
+    <div class="form-group" style="margin-top:8px">
+      <label>Нотатки / особливості</label>
+      <textarea id="dn-notes" rows="2" placeholder="Короткий опис борту..."></textarea>
+    </div>
+
+    <div id="drone-form-error" class="form-error hidden"></div>
+
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="closeAddDroneModal()">Скасувати</button>
+      <button class="btn btn-primary" style="width:auto;padding:9px 20px" onclick="saveDrone()">Зберегти борт</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-velocity@2.1.2/dist/leaflet-velocity.min.js"></script>
+<script src="/js/app.js"></script>
+<script src="/js/mission-editor.js"></script>
+
+<!-- ===== MISSION EDITOR PANEL (bottom overlay, Mission Planner-style) ===== -->
+<div id="mission-panel" class="mp-collapsed">
+
+  <!-- Header: always visible, click anywhere to expand/collapse -->
+  <div id="mp-header" class="mp-header">
+    <div class="mp-header-left">
+      <span id="mp-toggle-icon">▲</span>
+      <span class="mp-title">✈ Редактор місії</span>
+    </div>
+
+    <!-- Action buttons — data-no-toggle prevents header click from collapsing -->
+    <div class="mp-header-actions" data-no-toggle>
+      <label class="mp-hbtn" for="mp-upload-input" title="Завантажити .waypoints">↑ Завантажити</label>
+      <input type="file" id="mp-upload-input" accept=".waypoints,.txt" style="display:none">
+      <button class="mp-hbtn" id="mp-create-btn" title="Створити нову місію">✏ Створити</button>
+      <button class="mp-hbtn mp-hbtn-export" id="mp-export-btn" title="Зберегти .waypoints">⬇ Експорт</button>
+    </div>
+
+    <!-- Route stats: distance · waypoints · ETA -->
+    <div id="mp-stats" class="mp-stats"></div>
+  </div>
+
+  <!-- Body: waypoint table + add button -->
+  <div class="mp-body">
+    <div class="mp-table-wrap">
+      <table class="mp-table">
+        <thead>
+          <tr>
+            <th class="mp-col-idx">#</th>
+            <th class="mp-col-cmd">Команда</th>
+            <th class="mp-col-coord">Широта</th>
+            <th class="mp-col-coord">Довгота</th>
+            <th class="mp-col-alt">Висота м</th>
+            <th class="mp-col-dist">Відстань</th>
+            <th class="mp-col-act"></th>
+          </tr>
+        </thead>
+        <tbody id="mp-tbody"></tbody>
+      </table>
+    </div>
+    <button id="mp-add-btn" class="mp-add-btn">＋ Додати точку в центр карти</button>
+  </div>
+</div>
+</body>
+</html>

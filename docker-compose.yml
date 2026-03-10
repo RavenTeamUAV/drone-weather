@@ -1,0 +1,25 @@
+services:
+  drone-weather:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: drone-weather
+    restart: unless-stopped
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      - PORT=3000
+      - WINDY_API_KEY=${WINDY_API_KEY:-}
+
+    # Mount data directory so custom drones persist across container restarts
+    volumes:
+      - ./data:/app/data
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/config"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

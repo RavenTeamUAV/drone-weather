@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: drone-weather
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    envVars:
+      - key: NODE_VERSION
+        value: "18"
+      - key: PORT
+        value: "10000"
+      - key: WINDY_API_KEY
+        sync: false          # заповнюється вручну в Dashboard → Environment
+      - key: CACHE_TTL_MINUTES
+        value: "5"
+      - key: WIND_CACHE_TTL_MINUTES
+        value: "60"
+      - key: MAX_WAYPOINTS
+        value: "150"
+      - key: RATE_LIMIT_MAX
+        value: "120"

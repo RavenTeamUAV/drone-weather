@@ -1,0 +1,715 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background: #1a1a2e;
+  color: #e0e0e0;
+}
+
+/* ===== ПАНЕЛЬ ===== */
+#panel {
+  width: 300px;
+  min-width: 300px;
+  height: 100vh;
+  overflow-y: auto;
+  background: #16213e;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-right: 1px solid #0f3460;
+  z-index: 1000;
+}
+
+#panel-header {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #0f3460;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.logo { font-size: 16px; font-weight: 700; color: #e94560; }
+
+#live-clock {
+  font-size: 13px;
+  font-weight: 600;
+  color: #4caf50;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+}
+
+.section { display: flex; flex-direction: column; gap: 6px; }
+
+.section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #666;
+}
+
+/* ===== КНОПКИ ===== */
+.btn {
+  padding: 9px 14px;
+  border-radius: 7px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s;
+  text-align: center;
+}
+
+.btn-primary {
+  background: #e94560;
+  color: white;
+  width: 100%;
+  padding: 11px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.btn-primary:hover { background: #c73652; }
+.btn-primary:disabled { background: #444; cursor: not-allowed; }
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid #0f3460;
+  color: #e0e0e0;
+  display: block;
+}
+.btn-outline:hover { background: #0f3460; }
+.btn-outline.active { border-color: #e94560; color: #e94560; background: rgba(233,69,96,0.08); }
+
+/* ===== РУЧНЕ СТВОРЕННЯ МІСІЇ ===== */
+.mission-creator {
+  background: #0c1f3f;
+  border: 1px solid #1a4a80;
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.mission-creator.hidden { display: none; }
+
+.creator-alt-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.creator-label { font-size: 11px; color: #888; white-space: nowrap; }
+.creator-hint  { font-size: 10px; color: #555; }
+.creator-alt-row input[type="number"] {
+  width: 62px;
+  padding: 3px 7px;
+  background: #16213e;
+  border: 1px solid #1a4a80;
+  border-radius: 5px;
+  color: #e0e0e0;
+  font-size: 12px;
+  outline: none;
+}
+.creator-alt-row input[type="number"]:focus { border-color: #e94560; }
+
+.creator-status {
+  font-size: 11px;
+  color: #4caf50;
+  min-height: 14px;
+}
+.creator-actions { display: flex; gap: 5px; align-items: center; }
+.creator-done   { flex: 1; font-size: 12px !important; padding: 6px !important; width: auto !important; }
+.creator-undo   { white-space: nowrap; }
+.creator-cancel { color: #e94560 !important; }
+
+/* Crosshair cursor на карті під час створення */
+body.creating-mission #map,
+body.creating-mission .leaflet-grab,
+body.creating-mission .leaflet-container {
+  cursor: crosshair !important;
+}
+body.creating-mission .leaflet-interactive { cursor: crosshair !important; }
+
+.btn-small {
+  padding: 4px 10px;
+  background: #0f3460;
+  border: none;
+  border-radius: 5px;
+  color: #e0e0e0;
+  cursor: pointer;
+  font-size: 11px;
+}
+.btn-small:hover { background: #1a4a80; }
+.btn-small.active { background: #e94560; }
+
+.quick-times { display: flex; gap: 5px; }
+
+.layer-btns { display: flex; gap: 5px; }
+.layer-btn { flex: 1; }
+
+.model-btns { display: flex; gap: 4px; }
+.model-btn { flex: 1; font-size: 10px; padding: 4px 6px; }
+.model-label {
+  font-size: 10px;
+  color: #4caf50;
+  letter-spacing: 0.3px;
+  min-height: 14px;
+}
+
+/* ===== ИНПУТЫ ===== */
+select, input[type="datetime-local"] {
+  width: 100%;
+  padding: 8px 10px;
+  background: #0f3460;
+  border: 1px solid #1a4a80;
+  border-radius: 7px;
+  color: #e0e0e0;
+  font-size: 13px;
+  outline: none;
+}
+select:focus, input[type="datetime-local"]:focus { border-color: #e94560; }
+
+/* ===== СТАТУС ===== */
+.status-text { font-size: 11px; color: #666; min-height: 14px; }
+.status-text.ok { color: #4caf50; }
+.status-text.err { color: #e94560; }
+.status-text.warn { color: #ffc107; }
+
+/* ===== ИНФО О ДРОНЕ ===== */
+.drone-info { font-size: 11px; color: #666; min-height: 14px; line-height: 1.5; }
+.drone-info .val { color: #e0e0e0; font-weight: 500; }
+
+/* ===== КАРТОЧКА РЕЗУЛЬТАТА ===== */
+.result-card {
+  border-radius: 9px;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.result-card.green { background: rgba(76,175,80,.15); border: 1px solid rgba(76,175,80,.4); }
+.result-card.yellow { background: rgba(255,193,7,.15); border: 1px solid rgba(255,193,7,.4); }
+.result-card.red { background: rgba(233,69,96,.15); border: 1px solid rgba(233,69,96,.4); }
+
+.result-card .result-title {
+  font-size: 15px; font-weight: 700; margin-bottom: 8px;
+}
+.result-card.green .result-title { color: #4caf50; }
+.result-card.yellow .result-title { color: #ffc107; }
+.result-card.red .result-title { color: #e94560; }
+
+.result-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  font-size: 12px;
+}
+.result-row:last-child { border-bottom: none; }
+.result-row .lbl { color: #777; }
+
+/* ===== ЛЕГЕНДА ===== */
+.legend {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid #0f3460;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.legend-item { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #666; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot.green { background: #4caf50; }
+.dot.yellow { background: #ffc107; }
+.dot.red { background: #e94560; }
+
+/* ===== КАРТА ===== */
+#map {
+  flex: 1;
+  height: 100vh;
+}
+
+#windy-container {
+  flex: 1;
+  height: 100vh;
+}
+
+#windy-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+/* ===== МОДАЛКА ===== */
+.modal {
+  position: fixed; top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9999;
+}
+.modal-content {
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 10px;
+  padding: 18px;
+  min-width: 320px; max-width: 460px;
+  max-height: 80vh; overflow-y: auto;
+  position: relative;
+}
+.modal-close {
+  position: absolute; top: 10px; right: 10px;
+  background: none; border: none;
+  color: #666; font-size: 16px; cursor: pointer;
+}
+.modal-close:hover { color: #e0e0e0; }
+
+.modal-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+
+.weather-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 7px 9px; border-radius: 5px;
+  margin-bottom: 3px; font-size: 12px;
+  background: #0f3460;
+}
+.weather-row.highlight { background: #1a4a80; border: 1px solid #2a6ab0; }
+.weather-row.danger { background: rgba(233,69,96,.2); border: 1px solid rgba(233,69,96,.4); }
+.weather-row.warning { background: rgba(255,193,7,.15); border: 1px solid rgba(255,193,7,.3); }
+
+.weather-time { font-weight: 600; color: #e0e0e0; min-width: 80px; }
+.weather-wind { font-weight: 600; }
+.weather-details { font-size: 10px; color: #777; text-align: right; }
+
+.wind-status {
+  font-size: 10px; padding: 2px 5px;
+  border-radius: 3px; font-weight: 600;
+}
+.wind-status.ok { background: rgba(76,175,80,.3); color: #4caf50; }
+.wind-status.warn { background: rgba(255,193,7,.3); color: #ffc107; }
+.wind-status.bad { background: rgba(233,69,96,.3); color: #e94560; }
+
+/* ===== ALTITUDE SLIDER ===== */
+.alt-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.alt-min, .alt-max {
+  font-size: 10px;
+  color: #555;
+  white-space: nowrap;
+}
+#alt-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: #0f3460;
+  outline: none;
+  padding: 0;
+  border: none;
+}
+#alt-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e94560;
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
+#alt-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e94560;
+  cursor: pointer;
+  border: 2px solid white;
+}
+.alt-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+#alt-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e94560;
+}
+.alt-hint {
+  font-size: 10px;
+  color: #444;
+}
+
+/* ===== WIND SPEED LABEL ON MAP ===== */
+.wind-speed-label {
+  background: rgba(22, 33, 62, 0.85);
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e0e0e0;
+  backdrop-filter: blur(4px);
+}
+
+/* ===== RESULT ROW ALT HIGHLIGHT ===== */
+.result-row-alt {
+  background: rgba(233,69,96,.08);
+  border-radius: 4px;
+  padding: 3px 4px;
+  margin-bottom: 2px;
+}
+.result-row-alt .lbl { color: #e94560 !important; }
+
+/* ===== DRONE SELECT ROW ===== */
+.drone-select-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.drone-select-row select {
+  flex: 1;
+}
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  background: #e94560;
+  border: none;
+  border-radius: 7px;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+  padding-bottom: 2px;
+  transition: background 0.15s;
+}
+.btn-icon:hover { background: #c73652; }
+
+/* ===== ADD DRONE MODAL ===== */
+.modal-drone {
+  min-width: 360px;
+  max-width: 560px;
+  width: 90vw;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.form-group label {
+  font-size: 10px;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.form-group input,
+.form-group select,
+.form-group textarea {
+  padding: 6px 9px;
+  background: #0f3460;
+  border: 1px solid #1a4a80;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 12px;
+  outline: none;
+}
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus { border-color: #e94560; }
+.form-group textarea { resize: vertical; font-family: inherit; }
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.form-error {
+  background: rgba(233,69,96,.15);
+  border: 1px solid rgba(233,69,96,.4);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: #e94560;
+  margin-top: 8px;
+}
+
+/* ===== TAKEOFF MARKER ===== */
+.takeoff-icon {
+  background: #4caf50;
+  border: 2px solid white;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  width: 20px; height: 20px;
+}
+
+/* ===== WAYPOINT MARKERS ===== */
+.wp-marker {
+  background: #0f3460;
+  border: 2px solid #e94560;
+  border-radius: 50%;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; color: white;
+  cursor: pointer;
+}
+.wp-marker.green { border-color: #4caf50; }
+.wp-marker.yellow { border-color: #ffc107; }
+.wp-marker.red { border-color: #e94560; }
+.wp-marker.wp-takeoff { border-color: #4caf50; background: #1a3d2b; font-size: 13px; }
+.wp-marker.wp-land    { border-color: #ff9800; background: #3d2a0a; font-size: 13px; }
+
+.hidden { display: none !important; }
+
+/* Курсор при установке точки взлёта */
+body.picking-takeoff #map { cursor: crosshair !important; }
+body.picking-takeoff #map .leaflet-interactive { cursor: crosshair !important; }
+
+/* ===== MISSION EDITOR PANEL ===== */
+#mission-panel {
+  position: fixed;
+  bottom: 0;
+  left: 300px; /* same as #panel width */
+  right: 0;
+  z-index: 900;
+  background: rgba(13, 17, 38, 0.97);
+  border-top: 2px solid #1a4a80;
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  backdrop-filter: blur(6px);
+  transition: max-height 0.22s ease;
+}
+#mission-panel.mp-collapsed { max-height: 40px; overflow: hidden; }
+
+/* Push map content up so the panel doesn't obscure the bottom */
+#map, #windy-container { padding-bottom: 40px; }
+
+/* ── Header ── */
+.mp-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  height: 40px;
+  flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid #0f3460;
+}
+.mp-header:hover { background: rgba(26, 74, 128, 0.15); }
+#mission-panel.mp-collapsed .mp-header { border-bottom: none; }
+
+.mp-header-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #c0c8e0;
+  white-space: nowrap;
+}
+#mp-toggle-icon { color: #4caf50; font-size: 10px; }
+.mp-title { font-size: 12px; font-weight: 700; letter-spacing: 0.3px; }
+
+.mp-header-actions {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.mp-hbtn {
+  padding: 4px 10px;
+  background: #0f3460;
+  border: 1px solid #1a4a80;
+  border-radius: 5px;
+  color: #c0c8e0;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  font-family: inherit;
+  display: inline-block;
+}
+.mp-hbtn:hover { background: #1a4a80; color: #fff; }
+.mp-hbtn-export { border-color: #4caf50; color: #4caf50; }
+.mp-hbtn-export:hover { background: rgba(76,175,80,.15); }
+
+.mp-stats {
+  margin-left: auto;
+  font-size: 12px;
+  color: #8898b0;
+  white-space: nowrap;
+}
+.mp-stats b { color: #e0e0e0; }
+.mp-warn { color: #ffc107; }
+
+/* ── Body ── */
+.mp-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+#mission-panel.mp-collapsed .mp-body { display: none; }
+
+.mp-table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Table ── */
+.mp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 460px; /* enables horizontal scroll on small viewports */
+}
+.mp-table thead th {
+  background: #0c1a35;
+  color: #4a5878;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 5px 8px;
+  text-align: left;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid #0f3460;
+  white-space: nowrap;
+}
+.mp-table tbody tr {
+  border-bottom: 1px solid rgba(15, 52, 96, 0.4);
+  transition: background 0.1s;
+}
+.mp-table tbody tr:hover { background: rgba(26, 74, 128, 0.18); }
+.mp-row-to   { background: rgba(76, 175, 80, 0.04); }
+.mp-row-land { background: rgba(255, 152, 0, 0.04); }
+.mp-table td { padding: 3px 8px; vertical-align: middle; }
+
+/* Column widths — compact to fit common screen sizes */
+.mp-col-idx   { width: 28px; text-align: center; font-weight: 700; font-size: 11px; }
+.mp-col-cmd   { width: 68px; }
+.mp-col-coord { width: 110px; }
+.mp-col-alt   { width: 70px; }
+.mp-col-dist  { width: 68px; color: #4a5878; font-size: 11px; white-space: nowrap; }
+.mp-col-act   { width: 28px; text-align: center; }
+
+/* Index cell colour by type */
+.mp-row-to   .mp-col-idx { color: #4caf50; }
+.mp-row-land .mp-col-idx { color: #ff9800; }
+
+/* ── Inputs inside table ── */
+.mp-in {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: #c8d4e8;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  padding: 2px 4px;
+  outline: none;
+}
+.mp-in:focus { background: #0d2244; border-color: #e94560; }
+.mp-in-ro   { color: #3a4f6a; cursor: default; }
+.mp-in::-webkit-inner-spin-button { opacity: 0; }
+.mp-in:focus::-webkit-inner-spin-button { opacity: 0.6; }
+
+/* ── Select inside table ── */
+.mp-sel {
+  width: 100%;
+  background: #0f2040;
+  border: 1px solid #1a4a80;
+  border-radius: 4px;
+  color: #c8d4e8;
+  font-size: 11px;
+  padding: 2px 3px;
+  outline: none;
+}
+.mp-sel:focus { border-color: #e94560; }
+
+/* ── Delete button ── */
+.mp-del {
+  background: none;
+  border: none;
+  color: #2e4060;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.mp-del:hover { color: #e94560; background: rgba(233,69,96,.12); }
+
+/* ── Empty state ── */
+.mp-empty {
+  color: #2e4060;
+  text-align: center;
+  padding: 22px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.mp-empty b { color: #4a6080; }
+
+/* ── Add WP button ── */
+.mp-add-btn {
+  width: 100%;
+  background: none;
+  border: none;
+  border-top: 1px solid #0f3460;
+  color: #2e4060;
+  font-size: 11px;
+  padding: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.mp-add-btn:hover { color: #4caf50; background: rgba(76,175,80,.05); }
+
+/* ── Right-click context menu popup ── */
+.mp-ctx-popup .leaflet-popup-content-wrapper {
+  background: #0f2040;
+  border: 1px solid #1a4a80;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.5);
+  padding: 0;
+}
+.mp-ctx-popup .leaflet-popup-tip { background: #0f2040; }
+.mp-ctx-popup .leaflet-popup-content { margin: 0; }
+.mp-ctx-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: #c8d4e8;
+  font-size: 12px;
+  padding: 9px 16px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  white-space: nowrap;
+}
+.mp-ctx-btn:hover { background: rgba(26,74,128,.4); color: #4caf50; }
