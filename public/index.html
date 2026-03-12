@@ -10,6 +10,9 @@
 </head>
 <body>
 
+<!-- Кнопка-тригер лівої панелі -->
+<button id="panel-toggle" onclick="togglePanel()" title="Показати/сховати панель">◀</button>
+
 <!-- Панель управління -->
 <div id="panel">
   <div id="panel-header">
@@ -102,6 +105,8 @@
     <div class="section-title">Шар карти</div>
     <div class="layer-btns">
       <button class="btn-small layer-btn active" data-layer="osm" onclick="switchLayer('osm')">Карта</button>
+      <button class="btn-small layer-btn" data-layer="satellite" onclick="switchLayer('satellite')">Супутник</button>
+      <button class="btn-small layer-btn" data-layer="hybrid" onclick="switchLayer('hybrid')">Гібрид</button>
       <button class="btn-small layer-btn" data-layer="windy" onclick="switchLayer('windy')">Windy</button>
     </div>
   </div>

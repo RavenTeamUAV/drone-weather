@@ -2,7 +2,6 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  display: flex;
   height: 100vh;
   overflow: hidden;
   background: #1a1a2e;
@@ -11,8 +10,10 @@ body {
 
 /* ===== ПАНЕЛЬ ===== */
 #panel {
+  position: fixed;
+  left: 0;
+  top: 0;
   width: 300px;
-  min-width: 300px;
   height: 100vh;
   overflow-y: auto;
   background: #16213e;
@@ -21,8 +22,37 @@ body {
   flex-direction: column;
   gap: 12px;
   border-right: 1px solid #0f3460;
-  z-index: 1000;
+  z-index: 1001;
+  transition: transform 0.28s ease;
 }
+#panel.panel-hidden {
+  transform: translateX(-300px);
+}
+
+/* Кнопка-тригер панелі */
+#panel-toggle {
+  position: fixed;
+  left: 300px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1002;
+  width: 22px;
+  height: 48px;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e0e0e0;
+  font-size: 11px;
+  transition: left 0.28s ease, background 0.15s;
+  padding: 0;
+}
+#panel-toggle:hover { background: #0f3460; }
+#panel.panel-hidden + #panel-toggle { left: 0; }
 
 #panel-header {
   padding-bottom: 10px;
@@ -227,13 +257,13 @@ select:focus, input[type="datetime-local"]:focus { border-color: #e94560; }
 
 /* ===== КАРТА ===== */
 #map {
-  flex: 1;
-  height: 100vh;
+  position: fixed;
+  left: 0; right: 0; top: 0; bottom: 0;
 }
 
 #windy-container {
-  flex: 1;
-  height: 100vh;
+  position: fixed;
+  left: 0; right: 0; top: 0; bottom: 0;
 }
 
 #windy-frame {
@@ -484,7 +514,7 @@ body.picking-takeoff #map .leaflet-interactive { cursor: crosshair !important; }
 #mission-panel {
   position: fixed;
   bottom: 0;
-  left: 300px; /* same as #panel width */
+  left: 0;
   right: 0;
   z-index: 900;
   background: rgba(13, 17, 38, 0.97);
@@ -493,11 +523,14 @@ body.picking-takeoff #map .leaflet-interactive { cursor: crosshair !important; }
   flex-direction: column;
   max-height: 280px;
   backdrop-filter: blur(6px);
-  transition: max-height 0.22s ease;
+  transition: max-height 0.22s ease, left 0.28s ease;
 }
 #mission-panel.mp-collapsed { max-height: 40px; overflow: hidden; }
 
-/* Push map content up so the panel doesn't obscure the bottom */
+/* Коли ліва панель відкрита — зсуваємо редактор місій */
+body.panel-open #mission-panel { left: 300px; }
+
+/* Відступ знизу щоб редактор не перекривав карту */
 #map, #windy-container { padding-bottom: 40px; }
 
 /* ── Header ── */

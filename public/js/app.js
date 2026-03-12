@@ -1,5 +1,5 @@
 // ===== STATE =====
-let map, osmLayer;
+let map, osmLayer, satelliteLayer, labelsLayer;
 let waypoints = [];
 let weatherData = [];
 let markers = [];
@@ -86,7 +86,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Mission editor panel — init after map is ready
   if (typeof MissionEditor !== 'undefined') MissionEditor.init();
+
+  // Left panel — open by default
+  document.body.classList.add('panel-open');
+  _updatePanelToggle(true);
 });
+
+// ===== PANEL TOGGLE =====
+function togglePanel() {
+  const open = document.body.classList.toggle('panel-open');
+  _updatePanelToggle(open);
+  // Leaflet needs a size hint after layout change
+  setTimeout(() => map && map.invalidateSize(), 300);
+}
+function _updatePanelToggle(open) {
+  const btn = document.getElementById('panel-toggle');
+  if (!btn) return;
+  const panel = document.getElementById('panel');
+  btn.textContent = open ? '◀' : '▶';
+  btn.style.left   = open ? '300px' : '0';
+  panel.classList.toggle('panel-hidden', !open);
+}
 
 // ===== MAP =====
 function initMap() {
@@ -96,6 +116,19 @@ function initMap() {
     attribution: '© OpenStreetMap',
     maxZoom: 19
   }).addTo(map);
+
+  satelliteLayer = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: '© Esri World Imagery',
+    maxZoom: 19
+  });
+
+  labelsLayer = L.tileLayer(
+    'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+    attribution: '',
+    maxZoom: 19,
+    opacity: 0.8
+  });
 
 
   map.on('click', onMapClick);
@@ -198,8 +231,18 @@ async function switchLayer(layer) {
   });
   if (layer === 'windy') {
     showWindy();
-  } else {
-    showOSM();
+    return;
+  }
+  showOSM();
+  // swap base tile layer
+  [osmLayer, satelliteLayer, labelsLayer].forEach(l => { if (map.hasLayer(l)) map.removeLayer(l); });
+  if (layer === 'osm') {
+    osmLayer.addTo(map);
+  } else if (layer === 'satellite') {
+    satelliteLayer.addTo(map);
+  } else if (layer === 'hybrid') {
+    satelliteLayer.addTo(map);
+    labelsLayer.addTo(map);
   }
 }
 
