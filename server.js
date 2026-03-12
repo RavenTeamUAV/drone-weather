@@ -185,6 +185,7 @@ app.post('/api/parse-mission', upload.single('mission'), (req, res) => {
     return res.status(400).json({ error: 'Invalid file format. Expected QGC WPL (Mission Planner)' });
   }
 
+  let home = null;
   const waypoints = [];
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -193,20 +194,36 @@ app.post('/api/parse-mission', upload.single('mission'), (req, res) => {
     const fields = line.split('\t');
     if (fields.length < 11) continue;
 
-    const index = parseInt(fields[0]);
+    const index   = parseInt(fields[0]);
+    const frame   = parseInt(fields[2]) || 3;
     const command = parseInt(fields[3]);
-    // QGC WPL format: field 8 = latitude (Param5/X), field 9 = longitude (Param6/Y)
-    const lat = parseFloat(fields[8]);
-    const lon = parseFloat(fields[9]);
-    const alt = parseFloat(fields[10]);
+    // QGC WPL 110: fields 4-7 are param1-4, fields 8-10 are lat/lon/alt
+    const param1  = parseFloat(fields[4]) || 0;
+    const param2  = parseFloat(fields[5]) || 0;
+    const param3  = parseFloat(fields[6]) || 0;
+    const param4  = parseFloat(fields[7]) || 0;
+    const lat     = parseFloat(fields[8]);
+    const lon     = parseFloat(fields[9]);
+    const alt     = parseFloat(fields[10]);
 
-    // Skip home point (zero coordinates)
-    if (lat === 0 && lon === 0) continue;
-    // Keep only navigation commands: NAV_WAYPOINT=16, LAND=21, TAKEOFF=22, loiter 17-20, VTOL_TAKEOFF=84, VTOL_LAND=85
-    if (![16, 17, 18, 19, 20, 21, 22, 84, 85].includes(command)) continue;
+    // Index 0 is always the HOME point — extract separately, never add to mission waypoints
+    if (index === 0) {
+      if (lat && lon && isValidCoord(lat, lon)) {
+        home = { lat, lon, alt };
+      }
+      continue;
+    }
 
+    // Coordinate-based classification (no command whitelist needed):
+    // lat=0 AND lon=0  → DO/CONDITION command (no geographic position) — include as-is
+    // has valid coords → navigation waypoint
+    // invalid coords   → skip (corrupted line)
+    if (lat === 0 && lon === 0) {
+      waypoints.push({ index, command, frame, param1, param2, param3, param4, lat: 0, lon: 0, alt, origAlt: alt });
+      continue;
+    }
     if (!isValidCoord(lat, lon)) continue;
-    waypoints.push({ index, command, lat, lon, alt });
+    waypoints.push({ index, command, frame, param1, param2, param3, param4, lat, lon, alt, origAlt: alt });
   }
 
   if (waypoints.length === 0) {
@@ -216,7 +233,7 @@ app.post('/api/parse-mission', upload.single('mission'), (req, res) => {
     return res.status(400).json({ error: `Надто багато точок (${waypoints.length}). Макс. ${MAX_WAYPOINTS}` });
   }
 
-  res.json({ waypoints, count: waypoints.length });
+  res.json({ waypoints, home, count: waypoints.length });
 });
 
 // GET /api/wind-grid-windy — ECMWF wind grid from Windy Point Forecast API

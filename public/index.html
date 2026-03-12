@@ -238,7 +238,8 @@
       <label class="mp-hbtn" for="mp-upload-input" title="Завантажити .waypoints">↑ Завантажити</label>
       <input type="file" id="mp-upload-input" accept=".waypoints,.txt" style="display:none">
       <button class="mp-hbtn" id="mp-create-btn" title="Створити нову місію">✏ Створити</button>
-      <button class="mp-hbtn mp-hbtn-export" id="mp-export-btn" title="Зберегти .waypoints">⬇ Експорт</button>
+      <button class="mp-hbtn mp-hbtn-export" id="mp-export-btn" title="Зберегти .waypoints">⬇ WPL</button>
+      <button class="mp-hbtn mp-hbtn-kml"    id="mp-kml-btn"    title="Зберегти KML">🗺 KML</button>
     </div>
 
     <!-- Route stats: distance · waypoints · ETA -->
@@ -252,11 +253,17 @@
         <thead>
           <tr>
             <th class="mp-col-idx">#</th>
+            <th class="mp-col-frame">Фрейм</th>
             <th class="mp-col-cmd">Команда</th>
             <th class="mp-col-coord">Широта</th>
             <th class="mp-col-coord">Довгота</th>
             <th class="mp-col-alt">Висота м</th>
+            <th class="mp-col-p" title="Parameter 1">P1</th>
+            <th class="mp-col-p" title="Parameter 2">P2</th>
+            <th class="mp-col-p" title="Parameter 3">P3</th>
+            <th class="mp-col-p" title="Parameter 4">P4</th>
             <th class="mp-col-dist">Відстань</th>
+            <th class="mp-col-ord">↕</th>
             <th class="mp-col-act"></th>
           </tr>
         </thead>

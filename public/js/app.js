@@ -198,7 +198,8 @@ function addManualWaypoint(lat, lng) {
   const alt = parseInt(document.getElementById('default-alt').value) || 100;
   // origAlt — зберігаємо висоту введену користувачем,
   // щоб відновити її якщо точка стане проміжною після додавання нової
-  waypoints.push({ index: nextWpIndex++, lat, lon: lng, alt, origAlt: alt, command: 16 });
+  waypoints.push({ index: nextWpIndex++, lat, lon: lng, alt, origAlt: alt,
+    command: 16, frame: 3, param1: 0, param2: 0, param3: 0, param4: 0 });
   renderRoute();
   updateCreatorStatus();
 }
@@ -493,7 +494,10 @@ async function uploadMissionFile(file) {
     waypoints = data.waypoints;
     weatherData = [];
 
-    if (waypoints.length > 0 && !takeoffPoint) {
+    // Index 0 from the file is HOME — use it as takeoff point
+    if (data.home) {
+      setTakeoffPoint(data.home.lat, data.home.lon);
+    } else if (waypoints.length > 0 && !takeoffPoint) {
       setTakeoffPoint(waypoints[0].lat, waypoints[0].lon);
     }
 
@@ -515,17 +519,19 @@ function renderRoute() {
   if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
   if (waypoints.length === 0) return;
 
-  const latLngs = waypoints.map(wp => [wp.lat, wp.lon]);
+  // Only nav waypoints (with real coords) go on the map
+  const navWps = waypoints.filter(wp => wp.lat || wp.lon);
+  const latLngs = navWps.map(wp => [wp.lat, wp.lon]);
 
   // Polyline needs at least 2 points
-  if (waypoints.length >= 2) {
+  if (navWps.length >= 2) {
     routeLine = L.polyline(latLngs, {
       color: '#e94560', weight: 2, opacity: 0.8, dashArray: '6 4'
     }).addTo(map);
 
     // ── Direction arrows at midpoint of each segment ──
-    for (let i = 0; i < waypoints.length - 1; i++) {
-      const a = waypoints[i], b = waypoints[i + 1];
+    for (let i = 0; i < navWps.length - 1; i++) {
+      const a = navWps[i], b = navWps[i + 1];
       const midLat = (a.lat + b.lat) / 2;
       const midLon = (a.lon + b.lon) / 2;
 
@@ -556,30 +562,31 @@ function renderRoute() {
     }
   }
 
-  // Waypoint markers
+  // Waypoint markers — skip any command without coordinates (DO/CONDITION)
   waypoints.forEach((wp, i) => {
+    if (!wp.lat && !wp.lon) return;
+
     const isTakeoff = wp.command === 22;
     const isLand    = wp.command === 21;
+    const isRTL     = wp.command === 20;
+    const isSpline  = wp.command === 82;
+    const isLoiter  = [17, 18, 19, 93].includes(wp.command);
 
-    // Label and CSS class vary by command type
-    const label     = isTakeoff ? '↑' : isLand ? '↓' : wp.index;
-    const extraClass = isTakeoff ? 'wp-takeoff' : isLand ? 'wp-land' : '';
+    const label   = isTakeoff ? '↑' : isLand ? '↓' : isRTL ? '⟲' : isSpline ? '~' : wp.index;
+    const mkClass = isTakeoff ? 'wp-to' : isLand ? 'wp-land' : isRTL ? 'wp-rtl'
+                  : isLoiter  ? 'wp-loiter' : isSpline ? 'wp-spline' : 'wp-nav';
 
     const icon = L.divIcon({
       className: '',
-      html: `<div class="wp-marker ${extraClass}" id="wpm-${i}">${label}</div>`,
-      iconSize: [22, 22], iconAnchor: [11, 11]
+      html: `<div class="wp-marker ${mkClass}" id="wpm-${i}">${label}</div>`,
+      iconSize: [26, 26], iconAnchor: [13, 13]
     });
-    // Draggable so user can reposition waypoints directly on the map
     const m = L.marker([wp.lat, wp.lon], { icon, draggable: true }).addTo(map);
 
     if (isCreatingMission) {
-      const typeLabel = isTakeoff ? '↑ Зліт · 0 м'
-                      : isLand    ? '↓ Посадка · 0 м'
-                      : `#${wp.index} · ${wp.alt} м`;
       m.bindTooltip(
-        `${typeLabel} <span style="color:#e94560;font-size:10px">(клік = видалити)</span>`,
-        { direction: 'top', offset: [0, -8] }
+        `#${wp.index} · ${wp.alt} м <span style="color:#e94560;font-size:10px">(клік = видалити)</span>`,
+        { direction: 'top', offset: [0, -10] }
       );
     }
 
@@ -592,15 +599,15 @@ function renderRoute() {
         updateCreatorStatus();
         return;
       }
+      if (typeof MissionEditor !== 'undefined') MissionEditor.selectWp(i);
       showWeatherModal(i);
     });
 
-    // Update waypoint position after drag — recreate route so polyline + arrows stay correct
     m.on('dragend', evt => {
       const pos = evt.target.getLatLng();
       waypoints[i].lat = parseFloat(pos.lat.toFixed(6));
       waypoints[i].lon = parseFloat(pos.lng.toFixed(6));
-      renderRoute(); // recreates markers at new positions, updates polyline/arrows
+      renderRoute();
     });
 
     markers.push(m);
