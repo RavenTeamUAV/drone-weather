@@ -34,9 +34,10 @@ const MissionEditor = (() => {
     184: { short: 'RPT.SRV',  name: 'Do Repeat Servo',   p: ['Servo#',   'PWM',      'Repeat',   'Delay s'] },
     201: { short: 'CAM.CFG',  name: 'Digicam Config',    p: ['Mode',     'Shutter',  'Aperture', 'ISO'    ] },
     202: { short: 'CAM.CTL',  name: 'Digicam Control',   p: ['Session',  'ZoomPos',  '',         'Focus'  ] },
+    189: { short: 'LND.ST',   name: 'Do Land Start',     p: ['',         '',         '',         ''       ] },
     203: { short: 'JUMP',     name: 'Jump to WP',        p: ['WP#',      'Repeat',   '',         ''       ] },
     206: { short: 'CAM',      name: 'Camera Trigger',    p: ['Dist m',   '',         '',         ''       ] },
-    207: { short: 'CHUTE',    name: 'Do Parachute',      p: ['Action',   '',         '',         ''       ] },
+    208: { short: 'CHUTE',    name: 'Do Parachute',      p: ['Action',   '',         '',         ''       ] },
   };
 
   // ── Coordinate frames ─────────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ const MissionEditor = (() => {
 
   // Export mission to QGC WPL 110
   function exportMission() {
-    if (waypoints.length === 0) { alert('Місія порожня'); return; }
+    if (waypoints.length === 0) { if (typeof showToast === 'function') showToast('Місія порожня', 'warn'); return; }
     const hLat = (takeoffPoint?.lat ?? waypoints[0].lat).toFixed(7);
     const hLon = (takeoffPoint?.lon ?? waypoints[0].lon).toFixed(7);
     let txt = 'QGC WPL 110\n';
@@ -186,7 +187,7 @@ const MissionEditor = (() => {
 
   // Export mission to KML
   function exportKML() {
-    if (waypoints.length === 0) { alert('Місія порожня'); return; }
+    if (waypoints.length === 0) { if (typeof showToast === 'function') showToast('Місія порожня', 'warn'); return; }
     const navWps = waypoints.filter(w => w.lat && w.lon);
     const coords = navWps.map(w => `${w.lon.toFixed(7)},${w.lat.toFixed(7)},${w.alt}`).join('\n        ');
     const placemarks = navWps.map(w =>
