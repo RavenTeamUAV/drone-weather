@@ -629,7 +629,7 @@ body.panel-open #mission-panel { left: 300px; }
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
-  width: 1px; /* prevents auto-stretch; actual width = sum of explicit column widths */
+  width: 100%; /* stretch to right edge; resizer sets th.style.width directly so this still works */
 }
 .mp-table thead th {
   background: #0c1a35;
