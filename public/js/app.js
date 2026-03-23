@@ -99,8 +99,27 @@ function getUTCOffset() {
   return (off >= 0 ? '+' : '') + off;
 }
 
+// ===== AUTH =====
+async function checkAuth() {
+  const res = await fetch('/api/auth/me').catch(() => null);
+  if (!res || !res.ok) { location.replace('/login.html'); return null; }
+  return res.json();
+}
+
+async function doLogout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  location.replace('/login.html');
+}
+
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', async () => {
+  const user = await checkAuth();
+  if (!user) return; // redirect already triggered
+
+  // Show username in header
+  const nameEl = $id('user-name');
+  if (nameEl) nameEl.textContent = user.username;
+
   startClock();
   initMap();
   await loadConfig();

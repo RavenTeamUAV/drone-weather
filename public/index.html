@@ -18,6 +18,10 @@
   <div id="panel-header">
     <div class="logo">✈ Drone Weather</div>
     <div id="live-clock"></div>
+    <div id="user-bar">
+      <span id="user-name"></span>
+      <button id="logout-btn" onclick="doLogout()" title="Вийти">⏻</button>
+    </div>
   </div>
 
   <!-- Прихована форма завантаження місії (для mp-upload-input у редакторі) -->
@@ -128,18 +132,18 @@
 </div>
 
 <!-- Попап погоди по точці -->
-<div id="weather-modal" class="modal hidden">
+<div id="weather-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Погода по точці маршруту">
   <div class="modal-content">
-    <button class="modal-close" onclick="closeModal()">✕</button>
+    <button class="modal-close" onclick="closeModal()" aria-label="Закрити">✕</button>
     <div id="modal-body"></div>
   </div>
 </div>
 
 <!-- Модалка додавання борту -->
-<div id="add-drone-modal" class="modal hidden">
+<div id="add-drone-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="add-drone-title">
   <div class="modal-content modal-drone">
-    <button class="modal-close" onclick="closeAddDroneModal()">✕</button>
-    <div class="modal-title">✚ Додати борт</div>
+    <button class="modal-close" onclick="closeAddDroneModal()" aria-label="Закрити">✕</button>
+    <div id="add-drone-title" class="modal-title">✚ Додати борт</div>
 
     <div class="form-grid">
       <div class="form-group">

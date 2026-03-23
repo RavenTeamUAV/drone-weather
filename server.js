@@ -9,6 +9,14 @@ const fsSync = require('fs');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+// ===== AUTH CONFIG =====
+const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
+const JWT_EXPIRES = '7d';
+const INVITE_CODE = process.env.INVITE_CODE || '';
 
 // ===== CONFIG (env) =====
 const MAX_WAYPOINTS = parseInt(process.env.MAX_WAYPOINTS, 10) || 150;
@@ -73,6 +81,7 @@ const app = express();
 app.use(helmet({ contentSecurityPolicy: false })); // CSP off — Leaflet/Windy load from CDN
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -123,50 +132,140 @@ if (isPkg) {
   app.use(express.static(path.join(__dirname, 'public')));
 }
 
+// ===== AUTH MIDDLEWARE & HELPERS =====
+function authenticateToken(req, res, next) {
+  const token = req.cookies?.token;
+  if (!token) return res.status(401).json({ error: 'Не авторизовано' });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.clearCookie('token');
+    res.status(401).json({ error: 'Сесія закінчилась. Увійдіть знову.' });
+  }
+}
+
+const usersFilePath = path.join(dataDir, 'users.json');
+
+async function readUsers() {
+  try { return JSON.parse(await fs.readFile(usersFilePath, 'utf8')); }
+  catch { return []; }
+}
+
+async function writeUsers(users) {
+  await fs.writeFile(usersFilePath, JSON.stringify(users, null, 2), 'utf8');
+}
+
+function userDir(userId) {
+  return path.join(dataDir, 'users', userId);
+}
+
+async function ensureUserDir(userId) {
+  const dir = userDir(userId);
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
+}
+
+function setAuthCookie(res, payload) {
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  res.cookie('token', token, {
+    httpOnly: true, sameSite: 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  });
+  return token;
+}
+
+// ===== AUTH ROUTES =====
+// POST /api/auth/register
+app.post('/api/auth/register', async (req, res) => {
+  const { username, password, inviteCode } = req.body || {};
+  if (!username || !password || !inviteCode)
+    return res.status(400).json({ error: 'Заповніть всі поля' });
+  if (!INVITE_CODE)
+    return res.status(403).json({ error: 'Реєстрація вимкнена адміністратором' });
+  if (inviteCode !== INVITE_CODE)
+    return res.status(403).json({ error: 'Невірний invite-код' });
+  if (!/^[a-zA-Z0-9_]{3,32}$/.test(username))
+    return res.status(400).json({ error: 'Логін: 3–32 символи, тільки a–z, 0–9, _' });
+  if (password.length < 8)
+    return res.status(400).json({ error: 'Пароль — мінімум 8 символів' });
+
+  const users = await readUsers();
+  if (users.find(u => u.username.toLowerCase() === username.toLowerCase()))
+    return res.status(409).json({ error: 'Логін вже зайнятий' });
+
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const passwordHash = await bcrypt.hash(password, 12);
+  users.push({ id, username, passwordHash, createdAt: new Date().toISOString() });
+  await writeUsers(users);
+  await ensureUserDir(id);
+
+  setAuthCookie(res, { id, username });
+  res.json({ ok: true, username });
+});
+
+// POST /api/auth/login
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password)
+    return res.status(400).json({ error: 'Введіть логін та пароль' });
+
+  const users = await readUsers();
+  const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+  if (!user) return res.status(401).json({ error: 'Невірний логін або пароль' });
+
+  const ok = await bcrypt.compare(password, user.passwordHash);
+  if (!ok) return res.status(401).json({ error: 'Невірний логін або пароль' });
+
+  setAuthCookie(res, { id: user.id, username: user.username });
+  res.json({ ok: true, username: user.username });
+});
+
+// POST /api/auth/logout
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('token');
+  res.json({ ok: true });
+});
+
+// GET /api/auth/me — used by frontend to check session
+app.get('/api/auth/me', authenticateToken, (req, res) => {
+  res.json({ id: req.user.id, username: req.user.username });
+});
+
 // GET /api/config — expose public Windy key to the frontend
 app.get('/api/config', (req, res) => {
   res.json({ windyKey: process.env.WINDY_API_KEY || '' });
 });
 
-// GET /api/drones — return drone database
-app.get('/api/drones', async (req, res) => {
+// GET /api/drones — return current user's drone database
+app.get('/api/drones', authenticateToken, async (req, res) => {
   try {
-    const content = await fs.readFile(path.join(dataDir, 'drones.json'), 'utf8');
-    const drones = JSON.parse(content);
-    res.json(drones);
+    const dronesPath = path.join(await ensureUserDir(req.user.id), 'drones.json');
+    const content = await fs.readFile(dronesPath, 'utf8');
+    res.json(JSON.parse(content));
   } catch (err) {
     if (err.code === 'ENOENT') return res.json([]);
     console.error('Drones read error:', err.message);
-    res.status(500).json({ error: 'Не вдалося завантажити список бортов' });
+    res.status(500).json({ error: 'Не вдалося завантажити список бортів' });
   }
 });
 
-// POST /api/drones — add a new drone to the database (persisted to drones.json)
-app.post('/api/drones', async (req, res) => {
+// POST /api/drones — add drone to current user's database
+app.post('/api/drones', authenticateToken, async (req, res) => {
   const drone = req.body;
-
-  // Basic server-side validation
-  if (!drone || !drone.id || !drone.name || !drone.manufacturer) {
+  if (!drone || !drone.id || !drone.name || !drone.manufacturer)
     return res.status(400).json({ error: 'Missing required fields: id, name, manufacturer' });
-  }
 
-  const dronesPath = path.join(dataDir, 'drones.json');
+  const dronesPath = path.join(await ensureUserDir(req.user.id), 'drones.json');
   try {
-    const content = await fs.readFile(dronesPath, 'utf8');
-    const drones = JSON.parse(content);
-
-    if (drones.find(d => d.id === drone.id)) {
+    let drones = [];
+    try { drones = JSON.parse(await fs.readFile(dronesPath, 'utf8')); } catch {}
+    if (drones.find(d => d.id === drone.id))
       return res.status(400).json({ error: 'Борт з таким ID вже існує' });
-    }
-
     drones.push(drone);
     await fs.writeFile(dronesPath, JSON.stringify(drones, null, 2), 'utf8');
     res.json({ ok: true, drone });
   } catch (err) {
-    if (err.code === 'ENOENT') {
-      await fs.writeFile(dronesPath, JSON.stringify([drone], null, 2), 'utf8');
-      return res.json({ ok: true, drone });
-    }
     console.error('Drones write error:', err.message);
     res.status(500).json({ error: 'Не вдалося зберегти борт' });
   }

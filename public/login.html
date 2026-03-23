@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drone Weather — Вхід</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a1628;
+      color: #c8d8f0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card {
+      background: #0d1e3a;
+      border: 1px solid #1e3a5f;
+      border-radius: 12px;
+      padding: 36px 40px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+    }
+
+    .logo {
+      text-align: center;
+      font-size: 22px;
+      font-weight: 700;
+      color: #4fc3f7;
+      margin-bottom: 28px;
+      letter-spacing: 0.5px;
+    }
+
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid #1e3a5f;
+      margin-bottom: 24px;
+    }
+
+    .tab {
+      flex: 1;
+      background: none;
+      border: none;
+      color: #4a5878;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 0;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      margin-bottom: -1px;
+    }
+
+    .tab.active {
+      color: #4fc3f7;
+      border-bottom-color: #4fc3f7;
+    }
+
+    .form { display: none; flex-direction: column; gap: 14px; }
+    .form.active { display: flex; }
+
+    label {
+      font-size: 12px;
+      color: #4a5878;
+      margin-bottom: 4px;
+      display: block;
+    }
+
+    input {
+      width: 100%;
+      background: #0a1628;
+      border: 1px solid #1e3a5f;
+      border-radius: 6px;
+      color: #c8d8f0;
+      font-size: 14px;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input:focus { border-color: #4fc3f7; }
+
+    .btn {
+      background: #1565c0;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 12px;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-top: 4px;
+    }
+
+    .btn:hover { background: #1976d2; }
+    .btn:disabled { background: #1e3a5f; color: #4a5878; cursor: not-allowed; }
+
+    .error {
+      background: rgba(192, 57, 43, 0.15);
+      border: 1px solid rgba(192, 57, 43, 0.4);
+      color: #e57373;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 13px;
+      display: none;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: #4a5878;
+      text-align: center;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">✈ Drone Weather</div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('login')">Вхід</button>
+    <button class="tab" onclick="showTab('register')">Реєстрація</button>
+  </div>
+
+  <!-- LOGIN -->
+  <form class="form active" id="form-login" onsubmit="doLogin(event)">
+    <div>
+      <label>Логін</label>
+      <input id="l-username" type="text" autocomplete="username" required placeholder="ваш_логін">
+    </div>
+    <div>
+      <label>Пароль</label>
+      <input id="l-password" type="password" autocomplete="current-password" required placeholder="••••••••">
+    </div>
+    <div class="error" id="login-error"></div>
+    <button class="btn" type="submit" id="login-btn">Увійти</button>
+  </form>
+
+  <!-- REGISTER -->
+  <form class="form" id="form-register" onsubmit="doRegister(event)">
+    <div>
+      <label>Invite-код</label>
+      <input id="r-invite" type="text" required placeholder="отримайте у адміністратора">
+    </div>
+    <div>
+      <label>Логін</label>
+      <input id="r-username" type="text" autocomplete="username" required placeholder="від 3 символів, a–z 0–9 _">
+    </div>
+    <div>
+      <label>Пароль</label>
+      <input id="r-password" type="password" autocomplete="new-password" required placeholder="мінімум 8 символів">
+    </div>
+    <div>
+      <label>Підтвердіть пароль</label>
+      <input id="r-password2" type="password" autocomplete="new-password" required placeholder="повторіть пароль">
+    </div>
+    <div class="error" id="register-error"></div>
+    <button class="btn" type="submit" id="register-btn">Зареєструватись</button>
+    <p class="hint">Invite-код надається адміністратором</p>
+  </form>
+</div>
+
+<script>
+  // If already logged in — redirect to app
+  fetch('/api/auth/me').then(r => { if (r.ok) location.replace('/'); });
+
+  function showTab(tab) {
+    document.querySelectorAll('.tab').forEach((t, i) =>
+      t.classList.toggle('active', (i === 0) === (tab === 'login')));
+    document.getElementById('form-login').classList.toggle('active', tab === 'login');
+    document.getElementById('form-register').classList.toggle('active', tab === 'register');
+  }
+
+  function showError(id, msg) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function hideError(id) {
+    document.getElementById(id).style.display = 'none';
+  }
+
+  async function doLogin(e) {
+    e.preventDefault();
+    hideError('login-error');
+    const btn = document.getElementById('login-btn');
+    btn.disabled = true;
+    btn.textContent = 'Вхід…';
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: document.getElementById('l-username').value.trim(),
+          password: document.getElementById('l-password').value
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) { showError('login-error', data.error || 'Помилка входу'); return; }
+      location.replace('/');
+    } catch {
+      showError('login-error', 'Помилка з\'єднання з сервером');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Увійти';
+    }
+  }
+
+  async function doRegister(e) {
+    e.preventDefault();
+    hideError('register-error');
+    const pw  = document.getElementById('r-password').value;
+    const pw2 = document.getElementById('r-password2').value;
+    if (pw !== pw2) { showError('register-error', 'Паролі не співпадають'); return; }
+    const btn = document.getElementById('register-btn');
+    btn.disabled = true;
+    btn.textContent = 'Реєстрація…';
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: document.getElementById('r-username').value.trim(),
+          password: pw,
+          inviteCode: document.getElementById('r-invite').value.trim()
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) { showError('register-error', data.error || 'Помилка реєстрації'); return; }
+      location.replace('/');
+    } catch {
+      showError('register-error', 'Помилка з\'єднання з сервером');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Зареєструватись';
+    }
+  }
+</script>
+</body>
+</html>
