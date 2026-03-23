@@ -242,8 +242,10 @@
       <label class="mp-hbtn" for="mp-upload-input" title="Завантажити .waypoints">↑ Завантажити</label>
       <input type="file" id="mp-upload-input" accept=".waypoints,.txt" style="display:none">
       <button class="mp-hbtn" id="mp-create-btn" title="Створити нову місію">✏ Створити</button>
-      <button class="mp-hbtn mp-hbtn-export" id="mp-export-btn" title="Зберегти .waypoints">⬇ WPL</button>
-      <button class="mp-hbtn mp-hbtn-kml"    id="mp-kml-btn"    title="Зберегти KML">🗺 KML</button>
+      <button class="mp-hbtn mp-hbtn-export" id="mp-export-btn"    title="Зберегти .waypoints">⬇ WPL</button>
+      <button class="mp-hbtn mp-hbtn-kml"    id="mp-kml-btn"      title="Зберегти KML">🗺 KML</button>
+      <button class="mp-hbtn mp-hbtn-save"   id="mp-save-btn"     title="Зберегти місію на сервер" data-no-toggle>💾 Зберегти</button>
+      <button class="mp-hbtn mp-hbtn-missions" id="mp-missions-btn" title="Мої збережені місії"   data-no-toggle>📂 Місії</button>
     </div>
 
     <!-- Route stats: distance · waypoints · ETA -->
@@ -277,5 +279,36 @@
     <button id="mp-add-btn" class="mp-add-btn">＋ Додати точку в центр карти</button>
   </div>
 </div>
+
+<!-- ── My Missions modal ──────────────────────────────────────────────────── -->
+<div id="missions-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="missions-modal-title">
+  <div class="modal-content modal-missions">
+    <button class="modal-close" onclick="MissionEditor.closeMyMissions()" aria-label="Закрити">✕</button>
+    <div id="missions-modal-title" class="modal-title">📂 Мої місії</div>
+    <div id="missions-list" class="missions-list"></div>
+    <p id="missions-empty" class="missions-empty hidden">Немає збережених місій</p>
+    <div class="form-actions" style="margin-top:10px">
+      <button class="btn btn-outline" onclick="MissionEditor.closeMyMissions()">Закрити</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Save Mission modal ─────────────────────────────────────────────────── -->
+<div id="save-mission-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="save-mission-title">
+  <div class="modal-content" style="max-width:380px">
+    <button class="modal-close" onclick="MissionEditor.closeSaveMission()" aria-label="Закрити">✕</button>
+    <div id="save-mission-title" class="modal-title">💾 Зберегти місію</div>
+    <div class="form-group" style="margin-top:12px">
+      <label>Назва місії</label>
+      <input type="text" id="mission-name-input" maxlength="80" placeholder="Напр. Патруль Альфа">
+    </div>
+    <div id="save-mission-error" class="form-error hidden"></div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="MissionEditor.closeSaveMission()">Скасувати</button>
+      <button class="btn btn-primary" style="width:auto;padding:9px 22px" onclick="MissionEditor.confirmSaveMission()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

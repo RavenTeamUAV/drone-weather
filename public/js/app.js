@@ -230,6 +230,7 @@ function activateMissionCreation() {
   // Toggle off if already active
   if (isCreatingMission) { cancelMissionCreation(); return; }
 
+  MissionEditor.resetCurrentMission(); // нова місія — не перезаписувати стару
   waypoints = [];
   weatherData = [];
   nextWpIndex = 1;
@@ -567,6 +568,7 @@ async function uploadMissionFile(file) {
 
     waypoints = data.waypoints;
     weatherData = [];
+    MissionEditor.resetCurrentMission(); // файл з диска — не перезаписувати стару
 
     // Index 0 from the file is HOME — use it as takeoff point
     if (data.home) {

@@ -50,7 +50,9 @@ const MissionEditor = (() => {
   // Coordinate-based: any command with lat=0 AND lon=0 is a non-navigation (DO/CONDITION) command.
   // isDO is computed per-waypoint in _renderTable — no fixed set needed for classification.
 
-  let _selectedIdx = null;
+  let _selectedIdx      = null;
+  let _currentMissionId = null;   // ID останньої збереженої/завантаженої місії (для перезапису)
+  let _currentMissionName = null; // назва для попереднього заповнення поля
 
   // ─── Init ─────────────────────────────────────────────────────────────────────
   function init() {
@@ -84,6 +86,21 @@ const MissionEditor = (() => {
     document.getElementById('mp-add-btn').addEventListener('click', _addAtCenter);
     map.on('contextmenu', _onMapContextMenu);
     _initColResize();
+
+    document.getElementById('mp-save-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      _openSaveMission();
+    });
+    document.getElementById('mp-missions-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      _openMyMissions();
+    });
+
+    // Enter у полі назви місії — зберегти
+    document.getElementById('mission-name-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') confirmSaveMission();
+    });
+
     update();
   }
 
@@ -537,5 +554,167 @@ ${placemarks}
     el.innerHTML = html;
   }
 
-  return { init, update, selectWp, exportMission, exportKML, insertWP };
+  // ─── Save Mission ─────────────────────────────────────────────────────────────
+  function _openSaveMission() {
+    if (waypoints.length === 0) { showToast('Місія порожня', 'warn'); return; }
+    const input = document.getElementById('mission-name-input');
+    input.value = _currentMissionName || '';
+    const errEl = document.getElementById('save-mission-error');
+    errEl.textContent = '';
+    errEl.classList.add('hidden');
+    document.getElementById('save-mission-modal').classList.remove('hidden');
+    setTimeout(() => input.focus(), 50);
+  }
+
+  async function confirmSaveMission() {
+    const name  = document.getElementById('mission-name-input').value.trim();
+    const errEl = document.getElementById('save-mission-error');
+    if (!name) {
+      errEl.textContent = 'Введіть назву місії';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    const body = { name, waypoints, home: takeoffPoint || null };
+    if (_currentMissionId) body.id = _currentMissionId;
+
+    try {
+      const res  = await fetch('/api/missions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errEl.textContent = data.error || 'Помилка збереження';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      _currentMissionId   = data.id;
+      _currentMissionName = data.name;
+      closeSaveMission();
+      showToast(`Збережено: "${data.name}"`, 'info');
+    } catch {
+      errEl.textContent = 'Помилка мережі';
+      errEl.classList.remove('hidden');
+    }
+  }
+
+  function closeSaveMission() {
+    document.getElementById('save-mission-modal').classList.add('hidden');
+  }
+
+  // ─── My Missions ──────────────────────────────────────────────────────────────
+  async function _openMyMissions() {
+    const modal   = document.getElementById('missions-modal');
+    const listEl  = document.getElementById('missions-list');
+    const emptyEl = document.getElementById('missions-empty');
+    listEl.innerHTML = '<div style="color:#4a5878;font-size:12px;padding:12px">Завантаження...</div>';
+    emptyEl.classList.add('hidden');
+    modal.classList.remove('hidden');
+
+    try {
+      const res  = await fetch('/api/missions');
+      const list = await res.json();
+      if (!res.ok) {
+        listEl.innerHTML = `<div class="form-error">${list.error || 'Помилка'}</div>`;
+        return;
+      }
+      if (list.length === 0) {
+        listEl.innerHTML = '';
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+      listEl.innerHTML = '';
+      list.forEach(m => {
+        const date = new Date(m.updatedAt).toLocaleString('uk', { dateStyle: 'short', timeStyle: 'short' });
+        const row  = document.createElement('div');
+        row.className = 'missions-row';
+        row.innerHTML =
+          `<div class="missions-row-info">
+             <span class="missions-row-name">${_esc(m.name)}</span>
+             <span class="missions-row-meta">${m.waypointCount} точок · ${date}</span>
+           </div>
+           <div class="missions-row-actions">
+             <button class="mp-hbtn" data-id="${m.id}" data-action="load">↓ Відкрити</button>
+             <button class="mp-hbtn mp-hbtn-danger" data-id="${m.id}" data-action="delete" title="Видалити">✕</button>
+           </div>`;
+        listEl.appendChild(row);
+      });
+      // Single delegated listener
+      listEl.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        if (btn.dataset.action === 'load')   await _loadMission(btn.dataset.id);
+        if (btn.dataset.action === 'delete') await _deleteMission(btn.dataset.id, btn);
+      }, { once: true }); // replaced on each open
+    } catch {
+      listEl.innerHTML = '<div class="form-error">Помилка мережі</div>';
+    }
+  }
+
+  async function _loadMission(id) {
+    try {
+      const res  = await fetch(`/api/missions/${id}`);
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || 'Помилка завантаження', 'error'); return; }
+
+      // Replace global state — same pattern as uploadMissionFile in app.js
+      waypoints.splice(0, waypoints.length, ...data.waypoints);
+      weatherData.splice(0, weatherData.length);
+      nextWpIndex = waypoints.length + 1;
+
+      if (data.home) {
+        if (typeof setTakeoffPoint === 'function') setTakeoffPoint(data.home.lat, data.home.lon);
+        else takeoffPoint = data.home;
+      }
+
+      if (typeof renderRoute === 'function') renderRoute();
+      if (typeof updateMissionStatus === 'function') updateMissionStatus();
+
+      _currentMissionId   = data.id;
+      _currentMissionName = data.name;
+      update();
+      _expand();
+      closeMyMissions();
+      showToast(`Відкрито: "${data.name}"`, 'info');
+    } catch {
+      showToast('Помилка мережі', 'error');
+    }
+  }
+
+  async function _deleteMission(id, btn) {
+    if (!confirm('Видалити цю місію?')) return;
+    try {
+      const res = await fetch(`/api/missions/${id}`, { method: 'DELETE' });
+      if (!res.ok) { const d = await res.json(); showToast(d.error || 'Помилка', 'error'); return; }
+      const row = btn.closest('.missions-row');
+      if (row) row.remove();
+      if (_currentMissionId === id) { _currentMissionId = null; _currentMissionName = null; }
+      const listEl = document.getElementById('missions-list');
+      if (!listEl.querySelector('.missions-row')) {
+        document.getElementById('missions-empty').classList.remove('hidden');
+      }
+      showToast('Місію видалено', 'info');
+    } catch {
+      showToast('Помилка мережі', 'error');
+    }
+  }
+
+  function closeMyMissions() {
+    document.getElementById('missions-modal').classList.add('hidden');
+  }
+
+  // Скидає прив'язку до збереженої місії (після нової/завантаженої з файлу)
+  function resetCurrentMission() {
+    _currentMissionId   = null;
+    _currentMissionName = null;
+  }
+
+  function _esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  return { init, update, selectWp, exportMission, exportKML, insertWP,
+           confirmSaveMission, closeSaveMission, closeMyMissions, resetCurrentMission };
 })();

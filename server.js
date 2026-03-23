@@ -14,9 +14,20 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 // ===== AUTH CONFIG =====
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
+const DEFAULT_JWT_SECRET = 'change-me-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
 const JWT_EXPIRES = '7d';
 const INVITE_CODE = process.env.INVITE_CODE || '';
+const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production';
+
+const isDefaultJwtSecret = JWT_SECRET === DEFAULT_JWT_SECRET;
+if (isDefaultJwtSecret) {
+  console.warn('[SECURITY] JWT_SECRET не заданий. Використовується дефолтне значення.');
+  if (process.env.NODE_ENV === 'production') {
+    console.error('[SECURITY] Заборонено запуск у production без власного JWT_SECRET.');
+    process.exit(1);
+  }
+}
 
 // ===== CONFIG (env) =====
 const MAX_WAYPOINTS = parseInt(process.env.MAX_WAYPOINTS, 10) || 150;
@@ -76,10 +87,38 @@ function isValidCoord(lat, lon) {
     !Number.isNaN(lat) && !Number.isNaN(lon);
 }
 
+function parseValidDatetime(datetime) {
+  const d = new Date(datetime);
+  if (!Number.isFinite(d.getTime())) return null;
+  return d;
+}
+
+function parseFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 const app = express();
 
 app.use(helmet({ contentSecurityPolicy: false })); // CSP off — Leaflet/Windy load from CDN
-app.use(cors());
+const corsOriginsEnv = (process.env.CORS_ORIGINS || '').trim();
+const corsAllowedOrigins = corsOriginsEnv
+  ? corsOriginsEnv.split(',').map(s => s.trim()).filter(Boolean)
+  : [];
+if (corsAllowedOrigins.length > 0) {
+  app.use(cors({
+    origin: (origin, cb) => {
+      // Allow non-browser requests (no Origin header)
+      if (!origin) return cb(null, true);
+      if (corsAllowedOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error('Not allowed by CORS'));
+    },
+    credentials: true
+  }));
+} else {
+  // Backward compatible default (can be tightened via CORS_ORIGINS env var).
+  app.use(cors());
+}
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
@@ -140,7 +179,12 @@ function authenticateToken(req, res, next) {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch {
-    res.clearCookie('token');
+    res.clearCookie('token', {
+      httpOnly: true,
+      sameSite: 'strict',
+      secure: COOKIE_SECURE,
+      path: '/'
+    });
     res.status(401).json({ error: 'Сесія закінчилась. Увійдіть знову.' });
   }
 }
@@ -166,10 +210,28 @@ async function ensureUserDir(userId) {
   return dir;
 }
 
+function missionsDir(userId) {
+  return path.join(userDir(userId), 'missions');
+}
+
+async function ensureMissionsDir(userId) {
+  const dir = missionsDir(userId);
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
+}
+
+function safeMissionId(raw) {
+  // Prevent path traversal: only allow lowercase alphanumeric IDs
+  const id = path.basename(String(raw || ''));
+  return /^[a-z0-9]+$/.test(id) ? id : null;
+}
+
 function setAuthCookie(res, payload) {
   const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   res.cookie('token', token, {
     httpOnly: true, sameSite: 'strict',
+    secure: COOKIE_SECURE,
+    path: '/',
     maxAge: 7 * 24 * 60 * 60 * 1000
   });
   return token;
@@ -271,6 +333,86 @@ app.post('/api/drones', authenticateToken, async (req, res) => {
   }
 });
 
+// ===== MISSION SAVE / LOAD =====
+
+// GET /api/missions — list saved missions for current user
+app.get('/api/missions', authenticateToken, async (req, res) => {
+  try {
+    const dir = await ensureMissionsDir(req.user.id);
+    const files = (await fs.readdir(dir)).filter(f => f.endsWith('.json'));
+    const list = [];
+    for (const f of files) {
+      try {
+        const m = JSON.parse(await fs.readFile(path.join(dir, f), 'utf8'));
+        list.push({ id: m.id, name: m.name, savedAt: m.savedAt, updatedAt: m.updatedAt, waypointCount: (m.waypoints || []).length });
+      } catch { /* skip corrupt file */ }
+    }
+    list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    res.json(list);
+  } catch (err) {
+    console.error('Missions list error:', err.message);
+    res.status(500).json({ error: 'Не вдалося завантажити список місій' });
+  }
+});
+
+// GET /api/missions/:id — load one mission
+app.get('/api/missions/:id', authenticateToken, async (req, res) => {
+  const id = safeMissionId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Невірний ID місії' });
+  try {
+    const filePath = path.join(missionsDir(req.user.id), id + '.json');
+    const m = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    res.json(m);
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Місію не знайдено' });
+    res.status(500).json({ error: 'Не вдалося завантажити місію' });
+  }
+});
+
+// POST /api/missions — create or overwrite a mission
+app.post('/api/missions', authenticateToken, async (req, res) => {
+  const { name, waypoints: wps, home } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Вкажіть назву місії' });
+  if (name.trim().length > 80) return res.status(400).json({ error: 'Назва занадто довга (макс. 80 символів)' });
+  if (!Array.isArray(wps) || wps.length === 0) return res.status(400).json({ error: 'Місія порожня' });
+
+  const MAX_WP = parseInt(process.env.MAX_WAYPOINTS) || 150;
+  if (wps.length > MAX_WP) return res.status(400).json({ error: `Максимум ${MAX_WP} точок` });
+
+  const dir = await ensureMissionsDir(req.user.id);
+  const now = new Date().toISOString();
+
+  let id = req.body.id ? safeMissionId(req.body.id) : null;
+  let savedAt = now;
+
+  if (id) {
+    // Overwrite existing — preserve savedAt
+    try {
+      const existing = JSON.parse(await fs.readFile(path.join(dir, id + '.json'), 'utf8'));
+      savedAt = existing.savedAt || now;
+    } catch { id = null; } // file gone — treat as new
+  }
+
+  if (!id) id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+  const mission = { id, name: name.trim(), savedAt, updatedAt: now, home: home || null, waypoints: wps };
+  await fs.writeFile(path.join(dir, id + '.json'), JSON.stringify(mission, null, 2), 'utf8');
+  res.json({ ok: true, id, name: mission.name, updatedAt: now });
+});
+
+// DELETE /api/missions/:id — delete a mission
+app.delete('/api/missions/:id', authenticateToken, async (req, res) => {
+  const id = safeMissionId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Невірний ID місії' });
+  try {
+    await fs.unlink(path.join(missionsDir(req.user.id), id + '.json'));
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Місію не знайдено' });
+    res.status(500).json({ error: 'Не вдалося видалити місію' });
+  }
+});
+
 // POST /api/parse-mission — parse QGC WPL .waypoints file from Mission Planner
 app.post('/api/parse-mission', upload.single('mission'), (req, res) => {
   if (!req.file) {
@@ -293,21 +435,24 @@ app.post('/api/parse-mission', upload.single('mission'), (req, res) => {
     const fields = line.split('\t');
     if (fields.length < 11) continue;
 
-    const index   = parseInt(fields[0]);
-    const frame   = parseInt(fields[2]) || 3;
-    const command = parseInt(fields[3]);
+    const index = parseInt(fields[0], 10);
+    if (!Number.isFinite(index)) continue;
+    const frame = parseInt(fields[2], 10);
+    const frameVal = Number.isFinite(frame) ? frame : 3;
+    const command = parseInt(fields[3], 10);
+    const commandVal = Number.isFinite(command) ? command : 0;
     // QGC WPL 110: fields 4-7 are param1-4, fields 8-10 are lat/lon/alt
-    const param1  = parseFloat(fields[4]) || 0;
-    const param2  = parseFloat(fields[5]) || 0;
-    const param3  = parseFloat(fields[6]) || 0;
-    const param4  = parseFloat(fields[7]) || 0;
-    const lat     = parseFloat(fields[8]);
-    const lon     = parseFloat(fields[9]);
-    const alt     = parseFloat(fields[10]);
+    const param1  = parseFiniteNumber(fields[4]) ?? 0;
+    const param2  = parseFiniteNumber(fields[5]) ?? 0;
+    const param3  = parseFiniteNumber(fields[6]) ?? 0;
+    const param4  = parseFiniteNumber(fields[7]) ?? 0;
+    const lat     = parseFiniteNumber(fields[8]);
+    const lon     = parseFiniteNumber(fields[9]);
+    const alt     = parseFiniteNumber(fields[10]) ?? 0;
 
     // Index 0 is always the HOME point — extract separately, never add to mission waypoints
     if (index === 0) {
-      if (lat && lon && isValidCoord(lat, lon)) {
+      if (lat !== null && lon !== null && isValidCoord(lat, lon)) {
         home = { lat, lon, alt };
       }
       continue;
@@ -318,11 +463,11 @@ app.post('/api/parse-mission', upload.single('mission'), (req, res) => {
     // has valid coords → navigation waypoint
     // invalid coords   → skip (corrupted line)
     if (lat === 0 && lon === 0) {
-      waypoints.push({ index, command, frame, param1, param2, param3, param4, lat: 0, lon: 0, alt, origAlt: alt });
+      waypoints.push({ index, command: commandVal, frame: frameVal, param1, param2, param3, param4, lat: 0, lon: 0, alt, origAlt: alt });
       continue;
     }
-    if (!isValidCoord(lat, lon)) continue;
-    waypoints.push({ index, command, frame, param1, param2, param3, param4, lat, lon, alt, origAlt: alt });
+    if (lat === null || lon === null || !isValidCoord(lat, lon)) continue;
+    waypoints.push({ index, command: commandVal, frame: frameVal, param1, param2, param3, param4, lat, lon, alt, origAlt: alt });
   }
 
   if (waypoints.length === 0) {
@@ -343,8 +488,18 @@ app.get('/api/wind-grid-windy', async (req, res) => {
   }
 
   const COLS = 4, ROWS = 3; // 12 points — lighter load
-  const sw = { lat: parseFloat(swLat), lon: parseFloat(swLon) };
-  const ne = { lat: parseFloat(neLat), lon: parseFloat(neLon) };
+  const swLatN = parseFiniteNumber(swLat);
+  const swLonN = parseFiniteNumber(swLon);
+  const neLatN = parseFiniteNumber(neLat);
+  const neLonN = parseFiniteNumber(neLon);
+  if ([swLatN, swLonN, neLatN, neLonN].some(v => v === null)) {
+    return res.status(400).json({ error: 'Invalid coordinates' });
+  }
+  if (!isValidCoord(swLatN, swLonN) || !isValidCoord(neLatN, neLonN)) {
+    return res.status(400).json({ error: 'Coordinates out of range' });
+  }
+  const sw = { lat: swLatN, lon: swLonN };
+  const ne = { lat: neLatN, lon: neLonN };
   const key = process.env.WINDY_API_KEY;
 
   const points = [];
@@ -357,13 +512,14 @@ app.get('/api/wind-grid-windy', async (req, res) => {
   }
 
   // Round requested time down to the hour → ms timestamp
-  const targetTime = new Date(datetime);
+  const targetTime = parseValidDatetime(datetime);
+  if (!targetTime) return res.status(400).json({ error: 'Invalid datetime' });
   targetTime.setMinutes(0, 0, 0);
   const targetTs = targetTime.getTime();
 
   // Cache key — same 1dp rounding as /api/wind-grid
   const dtHour = targetTime.toISOString().slice(0, 13);
-  const windyCacheKey = `windy:${parseFloat(swLat).toFixed(1)},${parseFloat(swLon).toFixed(1)},${parseFloat(neLat).toFixed(1)},${parseFloat(neLon).toFixed(1)},${dtHour}`;
+  const windyCacheKey = `windy:${swLatN.toFixed(1)},${swLonN.toFixed(1)},${neLatN.toFixed(1)},${neLonN.toFixed(1)},${dtHour}`;
   const windyCached = getCached(windyCacheKey);
   if (windyCached) return res.json(windyCached);
 
@@ -433,9 +589,19 @@ app.get('/api/wind-grid', async (req, res) => {
   }
 
   const COLS = 4, ROWS = 3; // 12 points — Open-Meteo counts each coord as a separate call
-  const altM = parseInt(alt) || 100;
-  const sw = { lat: parseFloat(swLat), lon: parseFloat(swLon) };
-  const ne = { lat: parseFloat(neLat), lon: parseFloat(neLon) };
+  const swLatN = parseFiniteNumber(swLat);
+  const swLonN = parseFiniteNumber(swLon);
+  const neLatN = parseFiniteNumber(neLat);
+  const neLonN = parseFiniteNumber(neLon);
+  if ([swLatN, swLonN, neLatN, neLonN].some(v => v === null)) {
+    return res.status(400).json({ error: 'Invalid coordinates' });
+  }
+  if (!isValidCoord(swLatN, swLonN) || !isValidCoord(neLatN, neLonN)) {
+    return res.status(400).json({ error: 'Coordinates out of range' });
+  }
+  const altM = parseInt(alt, 10);
+  const sw = { lat: swLatN, lon: swLonN };
+  const ne = { lat: neLatN, lon: neLonN };
 
   // Grid NW→SE row by row
   const points = [];
@@ -448,12 +614,15 @@ app.get('/api/wind-grid', async (req, res) => {
   }
 
   // Cache key — 1dp rounding (~11 km) so small pans reuse the same cached result
-  const dtHour = new Date(datetime).toISOString().slice(0, 13);
-  const cacheKey = `wgrid:${parseFloat(swLat).toFixed(1)},${parseFloat(swLon).toFixed(1)},${parseFloat(neLat).toFixed(1)},${parseFloat(neLon).toFixed(1)},${dtHour},${model || 'ecmwf'}`;
+  const targetDate = parseValidDatetime(datetime);
+  if (!targetDate) return res.status(400).json({ error: 'Invalid datetime' });
+  const dtHour = targetDate.toISOString().slice(0, 13);
+  const cacheKey = `wgrid:${swLatN.toFixed(1)},${swLonN.toFixed(1)},${neLatN.toFixed(1)},${neLonN.toFixed(1)},${dtHour},${model || 'ecmwf'}`;
+  const altMEffective = Number.isFinite(altM) ? altM : 100;
   const cached = getCached(cacheKey);
   if (cached) {
     // Altitude selection is fast — re-apply on cached raw data
-    return res.json(buildGribJson(cached, points, datetime, altM, COLS, ROWS, sw, ne));
+    return res.json(buildGribJson(cached, points, datetime, altMEffective, COLS, ROWS, sw, ne));
   }
 
   try {
@@ -477,7 +646,7 @@ app.get('/api/wind-grid', async (req, res) => {
     const rawPoints = points.map((pt, i) => ({ ...pt, hourly: dataArr[i]?.hourly || null }));
     setCache(cacheKey, rawPoints, WIND_CACHE_TTL_MS);
 
-    return res.json(buildGribJson(rawPoints, points, datetime, altM, COLS, ROWS, sw, ne));
+    return res.json(buildGribJson(rawPoints, points, datetime, altMEffective, COLS, ROWS, sw, ne));
   } catch (err) {
     console.error('Wind grid error:', err.message);
     const msg = err.name === 'AbortError' ? 'Таймаут завантаження вітру.' : err.message;
@@ -522,12 +691,20 @@ app.post('/api/weather', async (req, res) => {
   if (!datetime) {
     return res.status(400).json({ error: 'No datetime provided' });
   }
+  const targetDate = parseValidDatetime(datetime);
+  if (!targetDate) {
+    return res.status(400).json({ error: 'Invalid datetime' });
+  }
   const invalid = waypoints.find(wp => !isValidCoord(wp.lat, wp.lon));
   if (invalid) {
     return res.status(400).json({ error: 'Невірні координати в точках маршруту' });
   }
+  const invalidIndex = waypoints.find(wp => !Number.isFinite(Number(wp.index)));
+  if (invalidIndex) {
+    return res.status(400).json({ error: 'Invalid waypoint index' });
+  }
 
-  const dateKey = new Date(datetime).toISOString().slice(0, 13); // cache per hour
+  const dateKey = targetDate.toISOString().slice(0, 13); // cache per hour
   const modelKey = model || 'ecmwf';
 
   try {

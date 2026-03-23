@@ -911,3 +911,63 @@ body.panel-open #mission-panel { left: 300px; }
 .toast-info { background: #0f3460; color: #e0e0e0; }
 .toast-warn { background: #b8860b; color: #1a1a2e; }
 .toast-error { background: #c0392b; color: #fff; }
+
+/* ── Mission Save/Load ─────────────────────────────────────────────────────── */
+.mp-hbtn-save     { border-color: #4caf50; color: #4caf50; }
+.mp-hbtn-save:hover { background: rgba(76,175,80,.13); }
+.mp-hbtn-missions { border-color: #5ba3e8; color: #5ba3e8; }
+.mp-hbtn-missions:hover { background: rgba(91,163,232,.13); }
+.mp-hbtn-danger   { border-color: #e94560; color: #e94560; padding: 3px 8px; }
+.mp-hbtn-danger:hover { background: rgba(233,69,96,.15); }
+
+.modal-missions { min-width: 380px; max-width: 560px; width: 90vw; }
+
+.missions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.missions-empty {
+  color: #4a5878;
+  text-align: center;
+  padding: 28px;
+  font-size: 13px;
+}
+.missions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: #0f2040;
+  border: 1px solid #1a4a80;
+  border-radius: 7px;
+  transition: background 0.15s;
+}
+.missions-row:hover { background: #142850; }
+.missions-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.missions-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.missions-row-meta {
+  font-size: 10px;
+  color: #4a5878;
+}
+.missions-row-actions {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
