@@ -18,6 +18,32 @@ let currentAltitude = 100; // metres — controlled by altitude slider
 let currentWindModel = 'ecmwf'; // weather model for wind grid
 let _windFetchController = null; // AbortController for in-flight wind requests
 let _windRateLimited = false;   // true after 429 — suppress further wind requests this session
+
+// Client-side wind grid cache — avoids HTTP round-trips for repeated (bounds, time, model, alt) combos.
+// Altitude slider and small map pans are served from here without any network request.
+const _windCache = new Map();
+const _WIND_CACHE_TTL = 30 * 60 * 1000; // 30 min (server holds raw data for 60 min)
+
+function _windCacheKey(b, dt, model, alt) {
+  // Round bounds to 1 decimal (~11 km) — matches server-side cache rounding
+  const r = n => (Math.round(n * 10) / 10).toFixed(1);
+  const hour = dt ? dt.slice(0, 13) : '';
+  return `${r(b.getSouth())},${r(b.getWest())},${r(b.getNorth())},${r(b.getEast())}|${hour}|${model}|${alt}`;
+}
+function _windCacheGet(key) {
+  const e = _windCache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.ts > _WIND_CACHE_TTL) { _windCache.delete(key); return null; }
+  return e.data;
+}
+function _windCacheSet(key, data) {
+  _windCache.set(key, { data, ts: Date.now() });
+  // Evict expired entries when cache grows
+  if (_windCache.size > 60) {
+    const now = Date.now();
+    for (const [k, v] of _windCache) if (now - v.ts > _WIND_CACHE_TTL) _windCache.delete(k);
+  }
+}
 let isCreatingMission = false;  // manual mission creation mode
 let nextWpIndex = 1;            // auto-incrementing index for manual waypoints
 
@@ -28,12 +54,41 @@ const WIND_MODEL_LABELS = {
   meteofrance: 'Météo-France — AROME/ARPEGE'
 };
 
+function getMainForecast(wpData) {
+  return wpData?.weather?.find(w => w.isForecastTime) || wpData?.weather?.[0];
+}
+
+function getWorstStatus(windSt, altSt, iceSt) {
+  if ([windSt, altSt, iceSt].includes('bad')) return 'bad';
+  if ([windSt, altSt, iceSt].includes('warn')) return 'warn';
+  return windSt === 'unknown' ? 'unknown' : 'ok';
+}
+
+const _els = {};
+function $id(id) {
+  return _els[id] || (_els[id] = document.getElementById(id));
+}
+
+function showToast(msg, type = 'info') {
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = msg;
+  toast.setAttribute('role', 'alert');
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('toast-visible'));
+  const t = setTimeout(() => {
+    toast.classList.remove('toast-visible');
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+  toast.onclick = () => { clearTimeout(t); toast.classList.remove('toast-visible'); setTimeout(() => toast.remove(), 300); };
+}
+
 // ===== LIVE CLOCK =====
 function startClock() {
   function tick() {
     const now = new Date();
     const local = now.toLocaleTimeString('uk', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    document.getElementById('live-clock').textContent = `${local} UTC${getUTCOffset()}`;
+    $id('live-clock').textContent = `${local} UTC${getUTCOffset()}`;
   }
   tick();
   setInterval(tick, 1000);
@@ -53,15 +108,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   setQuickTime(0);
   renderWindArrows(); // show wind on load
 
-  document.getElementById('drone-select').addEventListener('change', onDroneChange);
-  document.getElementById('mission-file').addEventListener('change', handleFileUpload);
+  $id('drone-select').addEventListener('change', onDroneChange);
+  $id('mission-file').addEventListener('change', handleFileUpload);
 
   // Re-render wind when datetime changes
-  document.getElementById('datetime-input').addEventListener('change', renderWindArrows);
+  $id('datetime-input').addEventListener('change', renderWindArrows);
 
   // Altitude slider — debounced to avoid race conditions on fast drag
-  const slider = document.getElementById('alt-slider');
-  const label  = document.getElementById('alt-label');
+  const slider = $id('alt-slider');
+  const label  = $id('alt-label');
   let _altTimer = null;
   slider.addEventListener('input', () => {
     currentAltitude = parseInt(slider.value);
@@ -70,7 +125,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Immediately remove old layer + clear canvas so stale particles don't linger
     if (velocityLayer) { map.removeLayer(velocityLayer); velocityLayer = null; }
     document.querySelectorAll('canvas.leaflet-velocity-canvas, .leaflet-overlay-pane canvas')
-      .forEach(c => c.getContext('2d').clearRect(0, 0, c.width, c.height));
+      .forEach(c => { const ctx = c.getContext?.('2d'); if (ctx) ctx.clearRect(0, 0, c.width, c.height); });
 
     // Debounce: fetch new wind data only after slider stops for 400 ms
     clearTimeout(_altTimer);
@@ -79,7 +134,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (weatherData.length > 0) {
         renderCloudOverlay();
         renderMarkersWithWeather();
-        renderResultCard(document.getElementById('datetime-input').value);
+        renderResultCard($id('datetime-input').value);
       }
     }, 400);
   });
@@ -100,9 +155,9 @@ function togglePanel() {
   setTimeout(() => map && map.invalidateSize(), 300);
 }
 function _updatePanelToggle(open) {
-  const btn = document.getElementById('panel-toggle');
+  const btn = $id('panel-toggle');
   if (!btn) return;
-  const panel = document.getElementById('panel');
+  const panel = $id('panel');
   btn.textContent = open ? '◀' : '▶';
   btn.style.left   = open ? '300px' : '0';
   panel.classList.toggle('panel-hidden', !open);
@@ -162,8 +217,8 @@ function activateMissionCreation() {
   renderRoute();
 
   isCreatingMission = true;
-  document.getElementById('mission-creator').classList.remove('hidden');
-  document.getElementById('mission-status').textContent = '';
+  $id('mission-creator').classList.remove('hidden');
+  $id('mission-status').textContent = '';
   document.body.classList.add('creating-mission');
   updateCreatorStatus();
 }
@@ -174,12 +229,12 @@ function cancelMissionCreation() {
   nextWpIndex = 1;
   renderRoute();
   _exitCreationMode();
-  document.getElementById('mission-status').textContent = '';
+  $id('mission-status').textContent = '';
 }
 
 function finishMissionCreation() {
   if (waypoints.length < 2) {
-    document.getElementById('creator-status').textContent = '⚠ Мінімум 2 точки для місії';
+    $id('creator-status').textContent = '⚠ Мінімум 2 точки для місії';
     return;
   }
   _exitCreationMode();
@@ -190,12 +245,12 @@ function finishMissionCreation() {
 
 function _exitCreationMode() {
   isCreatingMission = false;
-  document.getElementById('mission-creator').classList.add('hidden');
+  $id('mission-creator').classList.add('hidden');
   document.body.classList.remove('creating-mission');
 }
 
 function addManualWaypoint(lat, lng) {
-  const alt = parseInt(document.getElementById('default-alt').value) || 100;
+  const alt = parseInt($id('default-alt').value) || 100;
   // origAlt — зберігаємо висоту введену користувачем,
   // щоб відновити її якщо точка стане проміжною після додавання нової
   waypoints.push({ index: nextWpIndex++, lat, lon: lng, alt, origAlt: alt,
@@ -214,7 +269,7 @@ function undoLastWaypoint() {
 
 
 function updateCreatorStatus() {
-  const el = document.getElementById('creator-status');
+  const el = $id('creator-status');
   if (!el) return;
   if (waypoints.length === 0) {
     el.textContent = 'Клікайте на карту щоб додати точки';
@@ -248,8 +303,8 @@ async function switchLayer(layer) {
 }
 
 function showOSM() {
-  document.getElementById('map').classList.remove('hidden');
-  document.getElementById('windy-container').classList.add('hidden');
+  $id('map').classList.remove('hidden');
+  $id('windy-container').classList.add('hidden');
 }
 
 // ===== WEATHER MODEL SWITCHING =====
@@ -258,11 +313,11 @@ function setWindModel(model) {
   document.querySelectorAll('.model-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.model === model);
   });
-  document.getElementById('model-label').textContent = WIND_MODEL_LABELS[model] || model;
+  $id('model-label').textContent = WIND_MODEL_LABELS[model] || model;
   renderWindArrows();
   // Silent weather refresh — keeps card visible, updates values when data arrives
   if (waypoints.length > 0 && weatherData.length > 0) {
-    const datetime = document.getElementById('datetime-input').value;
+    const datetime = $id('datetime-input').value;
     if (datetime) refreshWeatherSilent(datetime);
   }
 }
@@ -289,16 +344,16 @@ async function refreshWeatherSilent(datetime) {
 
 function showWindy() {
   if (!windyKey) {
-    alert('Ключ Windy API не налаштовано');
+    showToast('Ключ Windy API не налаштовано', 'warn');
     switchLayer('osm');
     return;
   }
   const center = map.getCenter();
   const zoom = map.getZoom();
   const src = `https://embed.windy.com/embed2.html?lat=${center.lat.toFixed(4)}&lon=${center.lng.toFixed(4)}&detailLat=${center.lat.toFixed(4)}&detailLon=${center.lng.toFixed(4)}&width=650&height=450&zoom=${zoom}&level=surface&overlay=wind&product=ecmwf&menu=&message=true&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=m%2Fs&metricTemp=%C2%B0C&radarRange=-1`;
-  document.getElementById('windy-frame').src = src;
-  document.getElementById('map').classList.add('hidden');
-  document.getElementById('windy-container').classList.remove('hidden');
+  $id('windy-frame').src = src;
+  $id('map').classList.add('hidden');
+  $id('windy-container').classList.remove('hidden');
 }
 
 // ===== CONFIG =====
@@ -320,7 +375,7 @@ async function loadDrones() {
 }
 
 function rebuildDroneSelect() {
-  const select = document.getElementById('drone-select');
+  const select = $id('drone-select');
   const currentVal = select.value;
   select.innerHTML = '<option value="">— оберіть борт —</option>';
   drones.forEach(d => {
@@ -334,7 +389,7 @@ function rebuildDroneSelect() {
 
 function onDroneChange(e) {
   selectedDrone = drones.find(d => d.id === e.target.value) || null;
-  const info = document.getElementById('drone-info');
+  const info = $id('drone-info');
   if (selectedDrone) {
     const isFixedWing = selectedDrone.speedMin > 0;
     const typeLabel = isFixedWing ? 'Літак VTOL' : 'Мультиротор';
@@ -366,23 +421,23 @@ function setQuickTime(offsetHours) {
   now.setHours(now.getHours() + offsetHours);
   const iso = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
     .toISOString().slice(0, 16);
-  document.getElementById('datetime-input').value = iso;
+  $id('datetime-input').value = iso;
 }
 
 // ===== TAKEOFF POINT =====
 function activateTakeoffPicker() {
   pickingTakeoff = true;
   document.body.classList.add('picking-takeoff');
-  document.getElementById('set-takeoff-btn').textContent = 'Клікніть на карту...';
-  document.getElementById('set-takeoff-btn').classList.add('active');
+  $id('set-takeoff-btn').textContent = 'Клікніть на карту...';
+  $id('set-takeoff-btn').classList.add('active');
   if (currentLayer === 'windy') switchLayer('osm');
 }
 
 function deactivateTakeoffPicker() {
   pickingTakeoff = false;
   document.body.classList.remove('picking-takeoff');
-  document.getElementById('set-takeoff-btn').textContent = 'Поставити на карті';
-  document.getElementById('set-takeoff-btn').classList.remove('active');
+  $id('set-takeoff-btn').textContent = 'Поставити на карті';
+  $id('set-takeoff-btn').classList.remove('active');
 }
 
 function setTakeoffPoint(lat, lon) {
@@ -403,8 +458,8 @@ function setTakeoffPoint(lat, lon) {
     .addTo(map)
     .bindTooltip('Точка зльоту', { permanent: false });
 
-  document.getElementById('takeoff-info').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-  document.getElementById('takeoff-info').className = 'status-text ok';
+  $id('takeoff-info').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  $id('takeoff-info').className = 'status-text ok';
 }
 
 // ===== ROUTE DISTANCE & FLIGHT TIME =====
@@ -441,7 +496,7 @@ function calcFlightTimeMin(distKm, drone, windSpeedMs) {
 }
 
 function updateMissionStatus() {
-  const statusEl = document.getElementById('mission-status');
+  const statusEl = $id('mission-status');
   if (waypoints.length === 0) return;
 
   const distKm = calcRouteDistanceKm(waypoints);
@@ -449,7 +504,7 @@ function updateMissionStatus() {
   let windMs = 0;
   if (weatherData.length > 0) {
     const mid = weatherData[Math.floor(weatherData.length / 2)];
-    const fc = mid.weather.find(w => w.isForecastTime) || mid.weather[0];
+    const fc = getMainForecast(mid);
     if (fc) windMs = windForAlt(fc, mid.alt);
   }
 
@@ -474,7 +529,7 @@ async function handleFileUpload(e) {
 
 // Shared upload logic — called by both the left-panel input and the mission editor panel
 async function uploadMissionFile(file) {
-  const statusEl = document.getElementById('mission-status');
+  const statusEl = $id('mission-status');
   statusEl.textContent = 'Завантаження...';
   statusEl.className = 'status-text';
 
@@ -624,16 +679,16 @@ function renderRoute() {
 
 // ===== WEATHER CHECK =====
 async function checkWeather() {
-  if (waypoints.length === 0) { alert('Спочатку додайте точки маршруту'); return; }
-  if (isCreatingMission) { alert('Завершіть створення місії (кнопка ✓ Готово)'); return; }
+  if (waypoints.length === 0) { showToast('Спочатку додайте точки маршруту', 'warn'); return; }
+  if (isCreatingMission) { showToast('Завершіть створення місії (кнопка ✓ Готово)', 'warn'); return; }
 
-  const datetime = document.getElementById('datetime-input').value;
-  if (!datetime) { alert('Вкажіть дату та час вильоту'); return; }
+  const datetime = $id('datetime-input').value;
+  if (!datetime) { showToast('Вкажіть дату та час вильоту', 'warn'); return; }
 
-  const btn = document.getElementById('check-btn');
+  const btn = $id('check-btn');
   btn.disabled = true;
   btn.textContent = 'Завантаження...';
-  document.getElementById('result-card').className = 'result-card hidden';
+  $id('result-card').className = 'result-card hidden';
 
   try {
     const res = await fetch('/api/weather', {
@@ -642,7 +697,7 @@ async function checkWeather() {
       body: JSON.stringify({ waypoints, datetime, model: currentWindModel })
     });
     const data = await res.json();
-    if (!res.ok) { alert('Помилка: ' + data.error); return; }
+    if (!res.ok) { showToast('Помилка: ' + data.error, 'error'); return; }
 
     weatherData = data.results;
     renderMarkersWithWeather();
@@ -653,7 +708,7 @@ async function checkWeather() {
 
 
   } catch (err) {
-    alert('Помилка мережі: ' + err.message);
+    showToast('Помилка мережі: ' + err.message, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Перевірити погоду';
@@ -765,7 +820,7 @@ function calcCloudBaseM(forecast) {
 // Show a one-time wind error banner that stays until dismissed
 function showWindError(msg) {
   _windRateLimited = true;
-  let banner = document.getElementById('wind-error-banner');
+  let banner = $id('wind-error-banner');
   if (banner) { banner.textContent = msg; return; }
   banner = document.createElement('div');
   banner.id = 'wind-error-banner';
@@ -795,7 +850,7 @@ async function renderWindArrows() {
     .forEach(c => { try { c.getContext('2d').clearRect(0, 0, c.width, c.height); } catch(e) {} });
   if (window._windLabel) { map.removeControl(window._windLabel); window._windLabel = null; }
 
-  const datetime = document.getElementById('datetime-input').value;
+  const datetime = $id('datetime-input').value;
   if (!datetime) {
     map.getPane('tilePane').style.filter = '';
     return;
@@ -809,21 +864,29 @@ async function renderWindArrows() {
     // Extend bounds by 20% to avoid blank edges during interpolation
     const latPad = (b.getNorth() - b.getSouth()) * 0.2;
     const lonPad = (b.getEast()  - b.getWest())  * 0.2;
-    const params = new URLSearchParams({
-      swLat: (b.getSouth() - latPad).toFixed(4), swLon: (b.getWest() - lonPad).toFixed(4),
-      neLat: (b.getNorth() + latPad).toFixed(4), neLon: (b.getEast() + lonPad).toFixed(4),
-      datetime, model: currentWindModel, alt: currentAltitude
-    });
-    const res = await fetch(`/api/wind-grid?${params}`, { signal: _windFetchController.signal });
-    if (!res.ok) {
-      map.getPane('tilePane').style.filter = '';
-      if (res.status === 429) {
-        const body = await res.json().catch(() => ({}));
-        showWindError(body.error || 'Open-Meteo: денний ліміт запитів вичерпано. Вітер недоступний до завтра.');
+
+    // Check client cache first — altitude slider and small pans skip the HTTP request entirely
+    const cacheKey = _windCacheKey(b, datetime, currentWindModel, currentAltitude);
+    let gridData = _windCacheGet(cacheKey);
+
+    if (!gridData) {
+      const params = new URLSearchParams({
+        swLat: (b.getSouth() - latPad).toFixed(4), swLon: (b.getWest() - lonPad).toFixed(4),
+        neLat: (b.getNorth() + latPad).toFixed(4), neLon: (b.getEast() + lonPad).toFixed(4),
+        datetime, model: currentWindModel, alt: currentAltitude
+      });
+      const res = await fetch(`/api/wind-grid?${params}`, { signal: _windFetchController.signal });
+      if (!res.ok) {
+        map.getPane('tilePane').style.filter = '';
+        if (res.status === 429) {
+          const body = await res.json().catch(() => ({}));
+          showWindError(body.error || 'Open-Meteo: денний ліміт запитів вичерпано. Вітер недоступний до завтра.');
+        }
+        return;
       }
-      return;
+      gridData = await res.json();
+      _windCacheSet(cacheKey, gridData);
     }
-    const gridData = await res.json();
 
     // ── Compute actual wind speed from grid U/V data ──
     const uArr = gridData[0]?.data || [];
@@ -886,7 +949,7 @@ function renderCloudOverlay() {
   let totalCloud = 0;
   let count = 0;
   weatherData.forEach(d => {
-    const fc = d.weather.find(w => w.isForecastTime) || d.weather[0];
+    const fc = getMainForecast(d);
     if (!fc) return;
     let cover;
     if (currentAltitude < 1000) cover = fc.cloudCoverLow || 0;
@@ -913,7 +976,7 @@ function renderCloudOverlay() {
 // ===== MARKER COLOR UPDATE =====
 function renderMarkersWithWeather() {
   weatherData.forEach((wpData, i) => {
-    const forecast = wpData.weather.find(w => w.isForecastTime) || wpData.weather[0];
+    const forecast = getMainForecast(wpData);
     if (!forecast || !markers[i]) return;
 
     const alt = currentAltitude || wpData.alt;
@@ -921,10 +984,7 @@ function renderMarkersWithWeather() {
     const windSt = selectedDrone ? getWindStatus(wind, selectedDrone) : 'unknown';
     const altSt = getAltitudeStatus(forecast, alt);
     const iceSt = getIcingStatus(forecast, alt);
-
-    const worst = [windSt, altSt, iceSt].includes('bad') ? 'bad'
-      : [windSt, altSt, iceSt].includes('warn') ? 'warn'
-      : windSt === 'unknown' ? 'unknown' : 'ok';
+    const worst = getWorstStatus(windSt, altSt, iceSt);
 
     const colorMap = { ok: 'green', warn: 'yellow', bad: 'red', unknown: '' };
     const el = markers[i].getElement();
@@ -945,7 +1005,7 @@ function renderResultCard(datetime) {
   let cloudBaseSamples = [];
 
   weatherData.forEach((wpData, i) => {
-    const forecast = wpData.weather.find(w => w.isForecastTime) || wpData.weather[0];
+    const forecast = getMainForecast(wpData);
     if (!forecast) return;
 
     const alt = currentAltitude || wpData.alt;
@@ -1001,7 +1061,7 @@ function renderResultCard(datetime) {
   const flightTimeRow = flightMin ? `
     <div class="result-row"><span class="lbl">Розрахунковий час</span><span>${flightMin} хв${selectedDrone && flightMin > selectedDrone.flightTime ? ' ⚠️' : ''}</span></div>` : '';
 
-  const card = document.getElementById('result-card');
+  const card = $id('result-card');
   card.className = `result-card ${colorClass}`;
   card.innerHTML = `
     <div class="result-title">${title}</div>
@@ -1029,8 +1089,8 @@ function renderResultCard(datetime) {
 function showWeatherModal(idx) {
   const wp = waypoints[idx];
   const wpWeather = weatherData.find(w => w.waypointIndex === wp.index);
-  const modal = document.getElementById('weather-modal');
-  const body = document.getElementById('modal-body');
+  const modal = $id('weather-modal');
+  const body = $id('modal-body');
 
   if (!wpWeather) {
     body.innerHTML = `
@@ -1053,9 +1113,7 @@ function showWeatherModal(idx) {
     const windSt = selectedDrone ? getWindStatus(wind, selectedDrone, 'air') : 'unknown';
     const altSt = getAltitudeStatus(w, alt);
     const iceSt = getIcingStatus(w, alt);
-    const worst = [windSt, altSt, iceSt].includes('bad') ? 'bad'
-      : [windSt, altSt, iceSt].includes('warn') ? 'warn'
-      : windSt === 'unknown' ? 'unknown' : 'ok';
+    const worst = getWorstStatus(windSt, altSt, iceSt);
 
     const statusLabel = { ok: 'GO', warn: '⚠', bad: 'СТОП', unknown: '' }[worst];
     const rowClass = w.isForecastTime ? 'weather-row highlight'
@@ -1096,18 +1154,55 @@ function showWeatherModal(idx) {
     </div>`;
 
   modal.classList.remove('hidden');
+  _setupModalA11y(modal, closeModal);
 }
 
 function closeModal() {
-  document.getElementById('weather-modal').classList.add('hidden');
+  const modal = $id('weather-modal');
+  _teardownModalA11y(modal);
+  modal.classList.add('hidden');
 }
 
 document.addEventListener('click', e => {
-  const modal = document.getElementById('weather-modal');
+  const modal = $id('weather-modal');
   if (e.target === modal) closeModal();
-  const droneModal = document.getElementById('add-drone-modal');
+  const droneModal = $id('add-drone-modal');
   if (e.target === droneModal) closeAddDroneModal();
 });
+
+function _focusableSelector() {
+  return 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+}
+
+function _focusFirstInModal(modalEl) {
+  const first = modalEl.querySelector(_focusableSelector());
+  if (first) first.focus();
+}
+
+function _setupModalA11y(modalEl, onClose) {
+  _focusFirstInModal(modalEl);
+  const handleKey = (e) => {
+    if (e.key === 'Escape') { onClose(); return; }
+    if (e.key !== 'Tab') return;
+    const focusable = [...modalEl.querySelectorAll(_focusableSelector())];
+    if (focusable.length === 0) return;
+    const idx = focusable.indexOf(document.activeElement);
+    if (e.shiftKey) {
+      if (idx <= 0) { e.preventDefault(); focusable[focusable.length - 1].focus(); }
+    } else {
+      if (idx >= focusable.length - 1 || idx === -1) { e.preventDefault(); focusable[0].focus(); }
+    }
+  };
+  modalEl._modalKeyHandler = handleKey;
+  document.addEventListener('keydown', handleKey);
+}
+
+function _teardownModalA11y(modalEl) {
+  if (modalEl._modalKeyHandler) {
+    document.removeEventListener('keydown', modalEl._modalKeyHandler);
+    modalEl._modalKeyHandler = null;
+  }
+}
 
 // ===== WIND DIRECTION =====
 function windDirName(deg) {
@@ -1128,24 +1223,28 @@ function openAddDroneModal() {
   ['dn-name','dn-manufacturer','dn-flightTime','dn-speedMax','dn-speedMin',
    'dn-windGround','dn-windAir','dn-windGust','dn-maxAlt',
    'dn-tempMin','dn-tempMax','dn-weight','dn-ip','dn-notes'].forEach(id => {
-    const el = document.getElementById(id);
+    const el = $id(id);
     if (el) el.value = '';
   });
-  document.getElementById('dn-type').value = 'fixed-wing-vtol';
-  document.getElementById('drone-form-error').classList.add('hidden');
-  document.getElementById('add-drone-modal').classList.remove('hidden');
+  $id('dn-type').value = 'fixed-wing-vtol';
+  $id('drone-form-error').classList.add('hidden');
+  const modal = $id('add-drone-modal');
+  modal.classList.remove('hidden');
+  _setupModalA11y(modal, closeAddDroneModal);
 }
 
 function closeAddDroneModal() {
-  document.getElementById('add-drone-modal').classList.add('hidden');
+  const modal = $id('add-drone-modal');
+  _teardownModalA11y(modal);
+  modal.classList.add('hidden');
 }
 
 function val(id) {
-  return document.getElementById(id).value.trim();
+  return $id(id).value.trim();
 }
 
 async function saveDrone() {
-  const errEl = document.getElementById('drone-form-error');
+  const errEl = $id('drone-form-error');
   errEl.classList.add('hidden');
 
   const name = val('dn-name');
@@ -1194,8 +1293,8 @@ async function saveDrone() {
 
     drones.push(drone);
     rebuildDroneSelect();
-    document.getElementById('drone-select').value = drone.id;
-    onDroneChange({ target: document.getElementById('drone-select') });
+    $id('drone-select').value = drone.id;
+    onDroneChange({ target: $id('drone-select') });
     closeAddDroneModal();
   } catch (err) {
     showFormError('Помилка мережі: ' + err.message);
@@ -1203,7 +1302,7 @@ async function saveDrone() {
 }
 
 function showFormError(msg) {
-  const el = document.getElementById('drone-form-error');
+  const el = $id('drone-form-error');
   el.textContent = msg;
   el.classList.remove('hidden');
 }

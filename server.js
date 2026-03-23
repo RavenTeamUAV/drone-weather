@@ -262,6 +262,12 @@ app.get('/api/wind-grid-windy', async (req, res) => {
   targetTime.setMinutes(0, 0, 0);
   const targetTs = targetTime.getTime();
 
+  // Cache key — same 1dp rounding as /api/wind-grid
+  const dtHour = targetTime.toISOString().slice(0, 13);
+  const windyCacheKey = `windy:${parseFloat(swLat).toFixed(1)},${parseFloat(swLon).toFixed(1)},${parseFloat(neLat).toFixed(1)},${parseFloat(neLon).toFixed(1)},${dtHour}`;
+  const windyCached = getCached(windyCacheKey);
+  if (windyCached) return res.json(windyCached);
+
   try {
     const results = await Promise.all(points.map(async (pt) => {
       const response = await fetch('https://api.windy.com/api/point-forecast/v2', {
@@ -308,10 +314,12 @@ app.get('/api/wind-grid-windy', async (req, res) => {
       parameterCategory: 2, refTime: datetime, forecastTime: 0
     };
 
-    res.json([
+    const responseData = [
       { header: { ...baseHeader, parameterNumber: 2 }, data: uData },
       { header: { ...baseHeader, parameterNumber: 3 }, data: vData }
-    ]);
+    ];
+    setCache(windyCacheKey, responseData, WIND_CACHE_TTL_MS);
+    res.json(responseData);
   } catch (err) {
     console.error('Windy grid error:', err.message);
     res.status(500).json({ error: 'Windy grid failed: ' + err.message });
@@ -487,53 +495,40 @@ const OPEN_METEO_MODELS = {
   meteofrance: 'meteofrance_seamless'
 };
 
-// Batch URL for waypoint weather — all waypoints in ONE Open-Meteo request
-function buildWeatherBatchUrl(waypoints, datetime, model) {
-  const date = new Date(datetime);
-  const startDate = date.toISOString().split('T')[0];
-  const endDate = new Date(date.getTime() + 2 * 24 * 60 * 60 * 1000)
-    .toISOString().split('T')[0];
-  const omModel = OPEN_METEO_MODELS[model] || OPEN_METEO_MODELS.ecmwf;
-  const lats = waypoints.map(w => w.lat.toFixed(4)).join(',');
-  const lons = waypoints.map(w => w.lon.toFixed(4)).join(',');
-  const hourly = [
-    'wind_speed_10m',    'wind_direction_10m',
-    'wind_speed_80m',    'wind_direction_80m',
-    'wind_speed_120m',   'wind_speed_180m',
-    'wind_speed_1000hPa','wind_direction_1000hPa',
-    'wind_speed_975hPa', 'wind_direction_975hPa',
-    'wind_speed_950hPa', 'wind_direction_950hPa',
-    'wind_speed_925hPa', 'wind_direction_925hPa',
-    'wind_speed_850hPa', 'wind_direction_850hPa',
-    'wind_gusts_10m',    'precipitation',
-    'cloud_cover',       'cloud_cover_low',
-    'cloud_cover_mid',   'cloud_cover_high',
-    'visibility',        'temperature_2m',
-    'freezing_level_height'
-  ].join(',');
-  return `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&hourly=${hourly}&models=${omModel}&wind_speed_unit=ms&start_date=${startDate}&end_date=${endDate}&timezone=auto`;
-}
+const HOURLY_WEATHER = [
+  'wind_speed_10m', 'wind_direction_10m', 'wind_speed_80m', 'wind_direction_80m',
+  'wind_speed_120m', 'wind_speed_180m',
+  'wind_speed_1000hPa', 'wind_direction_1000hPa', 'wind_speed_975hPa', 'wind_direction_975hPa',
+  'wind_speed_950hPa', 'wind_direction_950hPa', 'wind_speed_925hPa', 'wind_direction_925hPa',
+  'wind_speed_850hPa', 'wind_direction_850hPa',
+  'wind_gusts_10m', 'precipitation', 'cloud_cover', 'cloud_cover_low',
+  'cloud_cover_mid', 'cloud_cover_high', 'visibility', 'temperature_2m', 'freezing_level_height'
+];
+const HOURLY_WIND_GRID = [
+  'wind_speed_10m', 'wind_direction_10m', 'wind_speed_80m', 'wind_direction_80m',
+  'wind_speed_120m', 'wind_speed_180m',
+  'wind_speed_1000hPa', 'wind_direction_1000hPa', 'wind_speed_975hPa', 'wind_direction_975hPa',
+  'wind_speed_950hPa', 'wind_direction_950hPa', 'wind_speed_925hPa', 'wind_direction_925hPa',
+  'wind_speed_850hPa', 'wind_direction_850hPa'
+];
 
-// Batch URL for all grid points in ONE request (replaces N individual calls)
-function buildWindGridBatchUrl(points, datetime, model) {
+function buildOpenMeteoBatchUrl(points, datetime, model, hourlyParams) {
   const date = new Date(datetime);
   const startDate = date.toISOString().split('T')[0];
-  const endDate = new Date(date.getTime() + 2 * 24 * 60 * 60 * 1000)
-    .toISOString().split('T')[0];
+  const endDate = new Date(date.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const omModel = OPEN_METEO_MODELS[model] || OPEN_METEO_MODELS.ecmwf;
   const lats = points.map(p => p.lat.toFixed(4)).join(',');
   const lons = points.map(p => p.lon.toFixed(4)).join(',');
-  const hourly = [
-    'wind_speed_10m','wind_direction_10m',
-    'wind_speed_80m','wind_direction_80m',
-    'wind_speed_120m','wind_speed_180m',
-    'wind_speed_1000hPa','wind_direction_1000hPa',
-    'wind_speed_975hPa','wind_direction_975hPa',
-    'wind_speed_950hPa','wind_direction_950hPa',
-    'wind_speed_925hPa','wind_direction_925hPa',
-    'wind_speed_850hPa','wind_direction_850hPa'
-  ].join(',');
+  const hourly = hourlyParams.join(',');
   return `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&hourly=${hourly}&models=${omModel}&wind_speed_unit=ms&start_date=${startDate}&end_date=${endDate}&timezone=auto`;
+}
+
+function buildWeatherBatchUrl(waypoints, datetime, model) {
+  return buildOpenMeteoBatchUrl(waypoints, datetime, model, HOURLY_WEATHER);
+}
+
+function buildWindGridBatchUrl(points, datetime, model) {
+  return buildOpenMeteoBatchUrl(points, datetime, model, HOURLY_WIND_GRID);
 }
 
 // Pick wind speed+direction for a given altitude — prefers height vars, falls back to pressure levels
