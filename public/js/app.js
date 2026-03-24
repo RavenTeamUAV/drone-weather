@@ -211,7 +211,8 @@ function initMap() {
   // Debounced re-fetch on pan/zoom
   let _windTimer = null;
   map.on('moveend zoomend', () => {
-    if (!_windActive) return; // вітер ще не показувався — не витрачати запити
+    // Оновлюємо вітер при переміщенні тільки якщо datetime встановлено
+    if (!$id('datetime-input')?.value) return;
     clearTimeout(_windTimer);
     _windTimer = setTimeout(renderWindArrows, 800);
   });
