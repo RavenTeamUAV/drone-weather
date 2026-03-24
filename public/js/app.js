@@ -924,8 +924,8 @@ async function renderWindArrows() {
     // velocityScale: how fast particles move visually (2 m/s → gentle, 15 m/s → fierce)
     const velocityScale = Math.max(0.002, Math.min(0.009, 0.002 + avgSpeed * 0.00035));
 
-    // particleMultiplier: more wind → more particles on screen
-    const baseMultiplier = Math.max(0.0006, Math.min(0.0030, 0.0005 + avgSpeed * 0.00015));
+    // particleMultiplier: more wind → more particles on screen (×0.45 — рідший потік)
+    const baseMultiplier = Math.max(0.0003, Math.min(0.0014, 0.00023 + avgSpeed * 0.00007));
 
     // particleAge: fast wind → shorter trails; calm → long trailing streamlines
     const baseAge = Math.round(Math.max(18, Math.min(75, 78 - avgSpeed * 3)));
@@ -945,9 +945,9 @@ async function renderWindArrows() {
       data: gridData,
       maxVelocity,
       colorScale: [
-        'rgba(74,234,220,0.45)', 'rgba(155,255,190,0.45)', 'rgba(187,255,155,0.45)',
-        'rgba(238,255,116,0.45)', 'rgba(255,212,0,0.45)', 'rgba(255,141,0,0.45)',
-        'rgba(255,80,80,0.45)', 'rgba(255,0,204,0.45)'
+        'rgba(74,234,220,0.22)', 'rgba(155,255,190,0.22)', 'rgba(187,255,155,0.22)',
+        'rgba(238,255,116,0.22)', 'rgba(255,212,0,0.22)', 'rgba(255,141,0,0.22)',
+        'rgba(255,80,80,0.22)', 'rgba(255,0,204,0.22)'
       ],
       particleAge,
       lineWidth: 1.5,
