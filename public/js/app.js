@@ -18,6 +18,7 @@ let currentAltitude = 100; // metres — controlled by altitude slider
 let currentWindModel = 'ecmwf'; // weather model for wind grid
 let _windFetchController = null; // AbortController for in-flight wind requests
 let _windRateLimited = false;   // true after 429 — suppress further wind requests this session
+let _windActive = false;        // true after wind particles were successfully shown at least once
 
 // Client-side wind grid cache — avoids HTTP round-trips for repeated (bounds, time, model, alt) combos.
 // Altitude slider and small map pans are served from here without any network request.
@@ -210,6 +211,7 @@ function initMap() {
   // Debounced re-fetch on pan/zoom
   let _windTimer = null;
   map.on('moveend zoomend', () => {
+    if (!_windActive) return; // вітер ще не показувався — не витрачати запити
     clearTimeout(_windTimer);
     _windTimer = setTimeout(renderWindArrows, 800);
   });
@@ -862,21 +864,21 @@ async function renderWindArrows() {
   // Blocked after 429 — don't waste remaining daily quota
   if (_windRateLimited) return;
 
-  // Cancel any in-flight request from previous render
-  if (_windFetchController) { _windFetchController.abort(); }
-  _windFetchController = new AbortController();
-
-  if (velocityLayer) { map.removeLayer(velocityLayer); velocityLayer = null; }
-  // leaflet-velocity keeps animating on its canvas even after removeLayer — clear it explicitly
-  document.querySelectorAll('canvas.leaflet-velocity-canvas, .leaflet-overlay-pane canvas')
-    .forEach(c => { try { c.getContext('2d').clearRect(0, 0, c.width, c.height); } catch(e) {} });
-  if (window._windLabel) { map.removeControl(window._windLabel); window._windLabel = null; }
-
   const datetime = $id('datetime-input').value;
   if (!datetime) {
+    // прибираємо шар тільки якщо він є
+    if (velocityLayer) { map.removeLayer(velocityLayer); velocityLayer = null; }
+    document.querySelectorAll('canvas.leaflet-velocity-canvas, .leaflet-overlay-pane canvas')
+      .forEach(c => { try { c.getContext('2d').clearRect(0, 0, c.width, c.height); } catch(e) {} });
+    if (window._windLabel) { map.removeControl(window._windLabel); window._windLabel = null; }
     map.getPane('tilePane').style.filter = '';
+    _windActive = false;
     return;
   }
+
+  // Cancel any in-flight request from previous render — НЕ видаляємо стару layer тут
+  if (_windFetchController) { _windFetchController.abort(); }
+  _windFetchController = new AbortController();
 
   // Darken map tiles so particles pop like on Windy
   map.getPane('tilePane').style.filter = 'brightness(0.35) saturate(0.5)';
@@ -940,6 +942,12 @@ async function renderWindArrows() {
     const particleMultiplier = baseMultiplier * zoomFactor;
     const particleAge = Math.round(baseAge * zoomFactor);
 
+    // Атомарна заміна: прибираємо стару layer тільки коли нова готова → частинки не зникають під час завантаження
+    if (velocityLayer) { map.removeLayer(velocityLayer); velocityLayer = null; }
+    document.querySelectorAll('canvas.leaflet-velocity-canvas, .leaflet-overlay-pane canvas')
+      .forEach(c => { try { c.getContext('2d').clearRect(0, 0, c.width, c.height); } catch(e) {} });
+    if (window._windLabel) { map.removeControl(window._windLabel); window._windLabel = null; }
+
     velocityLayer = L.velocityLayer({
       displayValues: false,
       data: gridData,
@@ -955,6 +963,7 @@ async function renderWindArrows() {
       frameRate: 30,
       velocityScale
     }).addTo(map);
+    _windActive = true;
   } catch (err) {
     map.getPane('tilePane').style.filter = '';
     if (err.name !== 'AbortError') console.error('Wind grid render error:', err.message);
