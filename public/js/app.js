@@ -997,13 +997,13 @@ async function renderWindArrows() {
 
     // ── Parameters scale with ACTUAL wind speed, not altitude ──
     // velocityScale: how fast particles move visually (2 m/s → gentle, 15 m/s → fierce)
-    const velocityScale = Math.max(0.0018, Math.min(0.0088, 0.0023 + avgSpeed * 0.00033));
+    const velocityScale = Math.max(0.0015, Math.min(0.007, 0.0018 + avgSpeed * 0.00028));
 
-    // particleMultiplier: more wind → more particles on screen (~2× less than original)
-    const baseMultiplier = Math.max(0.00008, Math.min(0.00035, 0.00007 + avgSpeed * 0.0000175));
+    // particleMultiplier: Apple HIG — moderate density, thin lines
+    const baseMultiplier = Math.max(0.00012, Math.min(0.0004, 0.0001 + avgSpeed * 0.00002));
 
-    // particleAge: fast wind → shorter trails; calm → long trailing streamlines
-    const baseAge = Math.round(Math.max(1, Math.min(6, 8 - avgSpeed * 0.55)));
+    // particleAge: longer trails for fluid Apple-style streamlines
+    const baseAge = Math.round(Math.max(14, Math.min(22, 22 - avgSpeed * 0.35)));
 
     // maxVelocity: colour scale top matches real data (avoids washed-out single colour)
     const maxVelocity = Math.max(8, Math.min(34, maxSpeed * 1.45));
@@ -1026,15 +1026,17 @@ async function renderWindArrows() {
       displayValues: false,
       data: gridData,
       maxVelocity,
+      // Apple HIG: thin white streamlines, opacity encodes speed
       colorScale: [
-        'rgba(44,24,72,0.54)', 'rgba(40,22,66,0.56)', 'rgba(36,19,60,0.58)',
-        'rgba(33,17,55,0.60)', 'rgba(30,15,50,0.62)', 'rgba(27,14,45,0.64)',
-        'rgba(24,12,41,0.66)', 'rgba(21,10,37,0.68)', 'rgba(18,9,33,0.70)'
+        'rgba(255,255,255,0.12)', 'rgba(255,255,255,0.20)',
+        'rgba(255,255,255,0.30)', 'rgba(255,255,255,0.40)',
+        'rgba(255,255,255,0.52)', 'rgba(255,255,255,0.62)',
+        'rgba(255,255,255,0.70)', 'rgba(255,255,255,0.76)'
       ],
       particleAge,
-      lineWidth: 3.2,
+      lineWidth: 1.1,
       particleMultiplier,
-      frameRate: 36,
+      frameRate: 60,
       velocityScale
     }).addTo(map);
     _windActive = true;
