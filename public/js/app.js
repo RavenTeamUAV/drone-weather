@@ -336,6 +336,17 @@ function updateCreatorStatus() {
   }
 }
 
+// ===== LAYER MENU TOGGLE =====
+function toggleLayerMenu() {
+  document.getElementById('layer-menu').classList.toggle('open');
+}
+// Закрити при кліку поза контролом
+document.addEventListener('click', e => {
+  if (!e.target.closest('#map-layer-control')) {
+    document.getElementById('layer-menu')?.classList.remove('open');
+  }
+});
+
 // ===== LAYER SWITCHING =====
 async function switchLayer(layer) {
   currentLayer = layer;

@@ -240,33 +240,67 @@ body.creating-mission .leaflet-interactive { cursor: crosshair !important; }
 
 .layer-btns { display: flex; gap: 5px; }
 
-/* ── Map layer control — top-right floating widget ── */
+/* ── Map layer control — top-right toggle ── */
 #map-layer-control {
   position: fixed;
   top: 120px;
   right: 10px;
   z-index: 1002;
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 5px;
-  background: var(--surface-strong);
+}
+
+#layer-toggle-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-md);
-  padding: 5px 7px;
+  background: var(--surface-strong);
   backdrop-filter: var(--blur-md);
   -webkit-backdrop-filter: var(--blur-md);
   box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast);
 }
+#layer-toggle-btn:hover { background: var(--surface-deep); }
+
+#layer-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: max-height 0.22s ease, opacity 0.18s ease;
+}
+#layer-menu.open {
+  max-height: 160px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .layer-btn {
-  padding: 5px 11px;
+  padding: 6px 14px;
   font-size: 12px;
   font-weight: 500;
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: var(--surface-strong);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
+  box-shadow: var(--shadow-sm);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   white-space: nowrap;
+  text-align: center;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 .layer-btn:hover { background: var(--surface-deep); color: var(--text-primary); }
 .layer-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
