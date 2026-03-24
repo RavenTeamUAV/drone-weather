@@ -104,17 +104,6 @@
     <div id="model-label" class="model-label">ECMWF IFS — European Centre</div>
   </div>
 
-  <!-- Шари карти -->
-  <div class="section">
-    <div class="section-title">Шар карти</div>
-    <div class="layer-btns">
-      <button class="btn-small layer-btn active" data-layer="osm" onclick="switchLayer('osm')">Карта</button>
-      <button class="btn-small layer-btn" data-layer="satellite" onclick="switchLayer('satellite')">Супутник</button>
-      <button class="btn-small layer-btn" data-layer="hybrid" onclick="switchLayer('hybrid')">Гібрид</button>
-      <button class="btn-small layer-btn" data-layer="windy" onclick="switchLayer('windy')">Windy</button>
-    </div>
-  </div>
-
   <!-- Легенда -->
   <div class="legend">
     <div class="legend-item"><span class="dot green"></span> Можна летіти</div>
@@ -125,6 +114,14 @@
 
 <!-- Карта -->
 <div id="map"></div>
+
+<!-- Керування шарами — правий верхній кут карти -->
+<div id="map-layer-control">
+  <button class="layer-btn active" data-layer="osm"       onclick="switchLayer('osm')">Карта</button>
+  <button class="layer-btn"        data-layer="satellite" onclick="switchLayer('satellite')">Супутник</button>
+  <button class="layer-btn"        data-layer="hybrid"    onclick="switchLayer('hybrid')">Гібрид</button>
+  <button class="layer-btn"        data-layer="windy"     onclick="switchLayer('windy')">Windy</button>
+</div>
 
 <!-- Windy iframe (прихований за замовчуванням) -->
 <div id="windy-container" class="hidden">
