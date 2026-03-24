@@ -24,12 +24,15 @@ let _windActive = false;        // true after wind particles were successfully s
 // Altitude slider and small map pans are served from here without any network request.
 const _windCache = new Map();
 const _WIND_CACHE_TTL = 30 * 60 * 1000; // 30 min (server holds raw data for 60 min)
+const WINDY_LIKE_BASE_FILTER = 'brightness(0.58) saturate(0.72) contrast(1.06)';
+const WINDY_LIKE_BASE_FILTER_HYBRID = 'brightness(0.68) saturate(0.78) contrast(1.04)';
 
-function _windCacheKey(b, dt, model, alt) {
-  // Round bounds to 1 decimal (~11 km) — matches server-side cache rounding
-  const r = n => (Math.round(n * 10) / 10).toFixed(1);
+function _windCacheKey(b, dt, model, alt, zoom = 0) {
+  // Round bounds to 2 decimals (~1.1 km) so panning does not reuse stale grids.
+  const r = n => (Math.round(n * 100) / 100).toFixed(2);
   const hour = dt ? dt.slice(0, 13) : '';
-  return `${r(b.getSouth())},${r(b.getWest())},${r(b.getNorth())},${r(b.getEast())}|${hour}|${model}|${alt}`;
+  const z = Math.round(zoom);
+  return `${r(b.getSouth())},${r(b.getWest())},${r(b.getNorth())},${r(b.getEast())}|${hour}|${model}|${alt}|z${z}`;
 }
 function _windCacheGet(key) {
   const e = _windCache.get(key);
@@ -44,6 +47,19 @@ function _windCacheSet(key, data) {
     const now = Date.now();
     for (const [k, v] of _windCache) if (now - v.ts > _WIND_CACHE_TTL) _windCache.delete(k);
   }
+}
+
+function _gridHasValidWind(gridData) {
+  const uArr = gridData?.[0]?.data;
+  const vArr = gridData?.[1]?.data;
+  if (!Array.isArray(uArr) || !Array.isArray(vArr) || uArr.length === 0 || vArr.length === 0) return false;
+  const maxLen = Math.min(uArr.length, vArr.length);
+  for (let i = 0; i < maxLen; i++) {
+    const u = uArr[i];
+    const v = vArr[i];
+    if (Number.isFinite(u) && Number.isFinite(v) && (u !== 0 || v !== 0)) return true;
+  }
+  return false;
 }
 let isCreatingMission = false;  // manual mission creation mode
 let nextWpIndex = 1;            // auto-incrementing index for manual waypoints
@@ -185,7 +201,8 @@ function _updatePanelToggle(open) {
 
 // ===== MAP =====
 function initMap() {
-  map = L.map('map', { center: [51.5, -0.1], zoom: 8, zoomControl: true });
+  map = L.map('map', { center: [51.5, -0.1], zoom: 8, zoomControl: false });
+  L.control.zoom({ position: 'topright' }).addTo(map);
 
   osmLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://opentopomap.org">OpenTopoMap</a>',
@@ -206,11 +223,27 @@ function initMap() {
     opacity: 0.8
   });
 
+  const ZoomBadge = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd() {
+      const div = L.DomUtil.create('div', 'leaflet-control zoom-badge');
+      div.setAttribute('aria-label', 'Поточний масштаб карти');
+      div.textContent = `Zoom ${map.getZoom()}`;
+      return div;
+    }
+  });
+  const zoomBadge = new ZoomBadge();
+  map.addControl(zoomBadge);
+  const updateZoomBadge = () => {
+    const el = zoomBadge.getContainer();
+    if (el) el.textContent = `Zoom ${map.getZoom()}`;
+  };
 
   map.on('click', onMapClick);
   // Debounced re-fetch on pan/zoom
   let _windTimer = null;
   map.on('moveend zoomend', () => {
+    updateZoomBadge();
     // Оновлюємо вітер при переміщенні тільки якщо datetime встановлено
     if (!$id('datetime-input')?.value) return;
     clearTimeout(_windTimer);
@@ -873,6 +906,8 @@ async function renderWindArrows() {
       .forEach(c => { try { c.getContext('2d').clearRect(0, 0, c.width, c.height); } catch(e) {} });
     if (window._windLabel) { map.removeControl(window._windLabel); window._windLabel = null; }
     map.getPane('tilePane').style.filter = '';
+    map.getPane('tilePane').style.opacity = '';
+    map.getPane('overlayPane').style.opacity = '';
     _windActive = false;
     return;
   }
@@ -881,8 +916,11 @@ async function renderWindArrows() {
   if (_windFetchController) { _windFetchController.abort(); }
   _windFetchController = new AbortController();
 
-  // Darken map tiles so particles pop like on Windy
-  map.getPane('tilePane').style.filter = 'brightness(0.35) saturate(0.5)';
+  // Windy-like backdrop: muted base map to emphasize stream particles.
+  const isHybrid = currentLayer === 'hybrid';
+  map.getPane('tilePane').style.filter = isHybrid ? WINDY_LIKE_BASE_FILTER_HYBRID : WINDY_LIKE_BASE_FILTER;
+  map.getPane('tilePane').style.opacity = isHybrid ? '0.97' : '0.94';
+  map.getPane('overlayPane').style.opacity = '0.97';
 
   try {
     const b = map.getBounds();
@@ -891,10 +929,10 @@ async function renderWindArrows() {
     const lonPad = (b.getEast()  - b.getWest())  * 0.2;
 
     // Check client cache first — altitude slider and small pans skip the HTTP request entirely
-    const cacheKey = _windCacheKey(b, datetime, currentWindModel, currentAltitude);
+    const cacheKey = _windCacheKey(b, datetime, currentWindModel, currentAltitude, map.getZoom());
     let gridData = _windCacheGet(cacheKey);
 
-    if (!gridData) {
+    if (!gridData || !_gridHasValidWind(gridData)) {
       const params = new URLSearchParams({
         swLat: (b.getSouth() - latPad).toFixed(4), swLon: (b.getWest() - lonPad).toFixed(4),
         neLat: (b.getNorth() + latPad).toFixed(4), neLon: (b.getEast() + lonPad).toFixed(4),
@@ -903,6 +941,8 @@ async function renderWindArrows() {
       const res = await fetch(`/api/wind-grid?${params}`, { signal: _windFetchController.signal });
       if (!res.ok) {
         map.getPane('tilePane').style.filter = '';
+        map.getPane('tilePane').style.opacity = '';
+        map.getPane('overlayPane').style.opacity = '';
         if (res.status === 429) {
           const body = await res.json().catch(() => ({}));
           showWindError(body.error || 'Open-Meteo: денний ліміт запитів вичерпано. Вітер недоступний до завтра.');
@@ -911,6 +951,27 @@ async function renderWindArrows() {
       }
       gridData = await res.json();
       _windCacheSet(cacheKey, gridData);
+    }
+
+    // Safety net: if stale/empty grid slipped through, force one fresh request bypassing cache
+    if (!_gridHasValidWind(gridData)) {
+      const freshParams = new URLSearchParams({
+        swLat: (b.getSouth() - latPad).toFixed(4), swLon: (b.getWest() - lonPad).toFixed(4),
+        neLat: (b.getNorth() + latPad).toFixed(4), neLon: (b.getEast() + lonPad).toFixed(4),
+        datetime, model: currentWindModel, alt: currentAltitude,
+        _ts: String(Date.now())
+      });
+      const freshRes = await fetch(`/api/wind-grid?${freshParams}`, { signal: _windFetchController.signal });
+      if (!freshRes.ok) {
+        map.getPane('tilePane').style.filter = '';
+        map.getPane('tilePane').style.opacity = '';
+        map.getPane('overlayPane').style.opacity = '';
+        return;
+      }
+      const freshGrid = await freshRes.json();
+      if (!_gridHasValidWind(freshGrid)) return;
+      gridData = freshGrid;
+      _windCacheSet(cacheKey, freshGrid);
     }
 
     // ── Compute actual wind speed from grid U/V data ──
@@ -925,23 +986,24 @@ async function renderWindArrows() {
 
     // ── Parameters scale with ACTUAL wind speed, not altitude ──
     // velocityScale: how fast particles move visually (2 m/s → gentle, 15 m/s → fierce)
-    const velocityScale = Math.max(0.002, Math.min(0.009, 0.002 + avgSpeed * 0.00035));
+    const velocityScale = Math.max(0.0018, Math.min(0.0088, 0.0023 + avgSpeed * 0.00033));
 
     // particleMultiplier: more wind → more particles on screen (~2× less than original)
-    const baseMultiplier = Math.max(0.0003, Math.min(0.0015, 0.00025 + avgSpeed * 0.000075));
+    const baseMultiplier = Math.max(0.00008, Math.min(0.00035, 0.00007 + avgSpeed * 0.0000175));
 
     // particleAge: fast wind → shorter trails; calm → long trailing streamlines
-    const baseAge = Math.round(Math.max(18, Math.min(75, 78 - avgSpeed * 3)));
+    const baseAge = Math.round(Math.max(1, Math.min(6, 8 - avgSpeed * 0.55)));
 
     // maxVelocity: colour scale top matches real data (avoids washed-out single colour)
-    const maxVelocity = Math.max(6, Math.min(28, maxSpeed * 1.3));
+    const maxVelocity = Math.max(8, Math.min(34, maxSpeed * 1.45));
 
-    // Zoom scaling: more particles + longer trails when zoomed in;
-    // floor at 1.0 so zooming out never reduces particle density below baseline
+    // Keep behavior consistent across zoom levels: only tiny adaptation.
     const zoom = map.getZoom();
-    const zoomFactor = Math.max(1.0, Math.pow(Math.max(5, Math.min(14, zoom)) / 9, 1.2));
-    const particleMultiplier = baseMultiplier * zoomFactor;
-    const particleAge = Math.round(baseAge * zoomFactor);
+    const zoomFactor = Math.max(0.92, Math.min(1.08, 1 + (Math.max(5, Math.min(14, zoom)) - 9) * 0.02));
+    // Extra damping for high zoom where particle density can feel too busy.
+    const highZoomDensityDamping = zoom >= 14 ? 0.4 : zoom >= 13 ? 0.62 : 1;
+    const particleMultiplier = baseMultiplier * zoomFactor * highZoomDensityDamping;
+    const particleAge = Math.round(baseAge * Math.max(0.94, Math.min(1.06, zoomFactor)));
 
     // Атомарна заміна: прибираємо стару layer тільки коли нова готова → частинки не зникають під час завантаження
     if (velocityLayer) { map.removeLayer(velocityLayer); velocityLayer = null; }
@@ -954,19 +1016,21 @@ async function renderWindArrows() {
       data: gridData,
       maxVelocity,
       colorScale: [
-        'rgba(74,234,220,0.35)', 'rgba(155,255,190,0.35)', 'rgba(187,255,155,0.35)',
-        'rgba(238,255,116,0.35)', 'rgba(255,212,0,0.35)', 'rgba(255,141,0,0.35)',
-        'rgba(255,80,80,0.35)', 'rgba(255,0,204,0.35)'
+        'rgba(44,24,72,0.54)', 'rgba(40,22,66,0.56)', 'rgba(36,19,60,0.58)',
+        'rgba(33,17,55,0.60)', 'rgba(30,15,50,0.62)', 'rgba(27,14,45,0.64)',
+        'rgba(24,12,41,0.66)', 'rgba(21,10,37,0.68)', 'rgba(18,9,33,0.70)'
       ],
       particleAge,
-      lineWidth: 1.5,
+      lineWidth: 3.2,
       particleMultiplier,
-      frameRate: 30,
+      frameRate: 36,
       velocityScale
     }).addTo(map);
     _windActive = true;
   } catch (err) {
     map.getPane('tilePane').style.filter = '';
+    map.getPane('tilePane').style.opacity = '';
+    map.getPane('overlayPane').style.opacity = '';
     if (err.name !== 'AbortError') console.error('Wind grid render error:', err.message);
   }
 }
@@ -992,14 +1056,14 @@ function renderCloudOverlay() {
   });
 
   const avgCloud = count > 0 ? totalCloud / count : 0;
-  const opacity = (avgCloud / 100) * 0.45; // max 45% overlay opacity
+  const opacity = Math.max(0, Math.min(0.35, (avgCloud / 100) * 0.36)); // subtler cloudy veil
 
   if (opacity < 0.02) return; // skip if basically clear
 
   const bounds = map.getBounds().pad(0.05);
   cloudOverlay = L.rectangle(bounds, {
     color: 'transparent',
-    fillColor: '#b0c4de',
+    fillColor: '#98aeca',
     fillOpacity: opacity,
     interactive: false
   }).addTo(map);

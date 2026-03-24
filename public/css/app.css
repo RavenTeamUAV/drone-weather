@@ -243,8 +243,8 @@ body.creating-mission .leaflet-interactive { cursor: crosshair !important; }
 /* ── Map layer control — top-right floating widget ── */
 #map-layer-control {
   position: fixed;
-  top: 12px;
-  right: 12px;
+  top: 120px;
+  right: 10px;
   z-index: 1002;
   display: flex;
   gap: 5px;
