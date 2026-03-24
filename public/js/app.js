@@ -925,7 +925,7 @@ async function renderWindArrows() {
     const velocityScale = Math.max(0.002, Math.min(0.009, 0.002 + avgSpeed * 0.00035));
 
     // particleMultiplier: more wind → more particles on screen (×0.45 — рідший потік)
-    const baseMultiplier = Math.max(0.0003, Math.min(0.0014, 0.00023 + avgSpeed * 0.00007));
+    const baseMultiplier = Math.max(0.00012, Math.min(0.0006, 0.0001 + avgSpeed * 0.00003));
 
     // particleAge: fast wind → shorter trails; calm → long trailing streamlines
     const baseAge = Math.round(Math.max(18, Math.min(75, 78 - avgSpeed * 3)));
